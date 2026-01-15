@@ -64,7 +64,7 @@
     "fresh": "^0.5.2",
     "fs-extra": "^9.0.1",
     "gc-stats": "^1.4.0",
-    "helmet": "^4.1.0",
+    "helmet": "^8.1.0",
     "highlight.js": "^11.11.1",
     "ioredis": "^5.8.0",
     "json5": "^2.1.3",
