@@ -1,0 +1,36 @@
+---
+version: '3.5'
+services:
+  vibehub:
+    image: vibehub/vibehub
+    build:
+      context: .
+      dockerfile: containers/vibehub/Dockerfile
+    tty: true
+    working_dir: /usr/src/app
+    ports:
+      - '3000:3000'
+    environment:
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: change-this-in-production
+      NODE_ENV: production
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    container_name: redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  redis-data:
+    # To migrate from existing anonymous volume, run:
+    # docker run --rm -v 137e254b70761a6ad1fc1e14c52be561055f620e2828a89cf8c0ea7fa42fa420:/source -v vibehub_redis-data:/dest alpine sh -c "cp -a /source/. /dest/"
+
+networks:
+  default:
+    name: vibehub

@@ -1,0 +1,18 @@
+---
+version: '3.5'
+services:
+  redis:
+    image: redis:alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - vibehub_redis-data:/data
+    command: redis-server --appendonly yes
+
+volumes:
+  vibehub_redis-data:
+    external: true
+    # To migrate from existing anonymous volume, run:
+    # docker run --rm -v 137e254b70761a6ad1fc1e14c52be561055f620e2828a89cf8c0ea7fa42fa420:/source -v vibehub_redis-data:/dest alpine sh -c "cp -a /source/. /dest/"
