@@ -935,8 +935,9 @@ export class ClaudeSessionManager {
     session: ActiveClaudeSession,
     message: SDKResultMessage
   ): Promise<void> {
-    // Stop thinking when result is received
-    this.updateThinking(sessionId, false);
+    // Stop thinking when result is received - force emit to ensure client receives it
+    // even if there was a race condition with permission response
+    this.forceEmitThinking(sessionId, false);
 
     // Get context usage from per-call usage - this represents actual context sent in the most recent API call
     // modelUsage.inputTokens is cumulative across all calls (for billing), not current context
@@ -1051,7 +1052,8 @@ export class ClaudeSessionManager {
    * Handle completion
    */
   private async handleComplete(sessionId: string): Promise<void> {
-    this.updateThinking(sessionId, false);
+    // Force emit to ensure client receives thinking:false even in race conditions
+    this.forceEmitThinking(sessionId, false);
     this.logger.info('Claude session completed', { sessionId });
 
     // Check for pending messages from other sessions
