@@ -4,7 +4,7 @@
 interface RequestOptions {
   method?: string;
   headers?: Record<string, string>;
-  body?: any;
+  body?: unknown;
 }
 
 class ApiClient {
@@ -46,11 +46,11 @@ class ApiClient {
     return this.request(url, { ...options, method: 'GET' });
   }
 
-  post(url: string, body?: any, options?: RequestOptions) {
+  post(url: string, body?: unknown, options?: RequestOptions) {
     return this.request(url, { ...options, method: 'POST', body });
   }
 
-  put(url: string, body?: any, options?: RequestOptions) {
+  put(url: string, body?: unknown, options?: RequestOptions) {
     return this.request(url, { ...options, method: 'PUT', body });
   }
 

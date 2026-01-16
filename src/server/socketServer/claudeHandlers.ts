@@ -236,7 +236,7 @@ export function registerClaudeHandlers(io: Server): void {
           }
         }
 
-        claudeManager.sendMessage(sessionId, finalContent);
+        await claudeManager.sendMessage(sessionId, finalContent);
 
         // Update last accessed time
         await sessionStore.touchSession(sessionId);

@@ -143,6 +143,7 @@ function ApprovalButtons({
 
 interface ToolUseRendererProps {
   toolName: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   input: any;
   output?: unknown;
   showApprovalButtons?: boolean;

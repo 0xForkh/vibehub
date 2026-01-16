@@ -124,15 +124,16 @@ export function ClaudeConversationView({
                 rehypePlugins={[rehypeHighlight]}
                 components={{
                   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-                  code: ({ inline, children, ...props }: any) => (
-                    inline ? (
+                  code: ({ children, className, ...props }) => {
+                    const isInline = !className;
+                    return isInline ? (
                       <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-gray-800" {...props}>
                         {children}
                       </code>
                     ) : (
-                      <code {...props}>{children}</code>
-                    )
-                  ),
+                      <code className={className} {...props}>{children}</code>
+                    );
+                  },
                 }}
               >
                 {textWithoutFiles}
@@ -173,15 +174,16 @@ export function ClaudeConversationView({
                   rehypePlugins={[rehypeHighlight]}
                   components={{
                     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-                    code: ({ inline, children, ...props }: any) => (
-                      inline ? (
+                    code: ({ children, className, ...props }) => {
+                      const isInline = !className;
+                      return isInline ? (
                         <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-gray-800" {...props}>
                           {children}
                         </code>
                       ) : (
-                        <code {...props}>{children}</code>
-                      )
-                    ),
+                        <code className={className} {...props}>{children}</code>
+                      );
+                    },
                   }}
                 >
                   {block.text || ''}

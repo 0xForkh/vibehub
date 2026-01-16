@@ -11,10 +11,14 @@ export function CodeBlock({ children }: CodeBlockProps) {
 
   const handleCopy = async () => {
     // Extract text content from children
-    const extractText = (node: any): string => {
+    const extractText = (node: React.ReactNode): string => {
       if (typeof node === 'string') return node;
+      if (typeof node === 'number') return String(node);
       if (Array.isArray(node)) return node.map(extractText).join('');
-      if (node?.props?.children) return extractText(node.props.children);
+      if (node && typeof node === 'object' && 'props' in node) {
+        const element = node as React.ReactElement<{ children?: React.ReactNode }>;
+        return extractText(element.props.children);
+      }
       return '';
     };
 
