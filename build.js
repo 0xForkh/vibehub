@@ -67,7 +67,6 @@ async function buildClient(watching){
             }),
             copy({
                 assets: [
-                    {from: './src/assets/xterm_config/*', to: 'xterm_config'},
                     {from: './src/assets/favicon.ico', to: 'favicon.ico'},
                     {from: './src/client/index.html', to: 'index.html'},
                 ],

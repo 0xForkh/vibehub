@@ -12,21 +12,33 @@ import { McpToolUse } from './McpToolUse';
 import { DefaultToolUse } from './DefaultToolUse';
 import { ExitPlanModeToolUse } from './ExitPlanModeToolUse';
 
-interface AlwaysAllowDropdownProps {
+interface ApprovalButtonsProps {
+  toolName: string;
   onApprove?: () => void;
   onApproveAndRemember?: () => void;
   onApproveAndRememberGlobal?: () => void;
+  onApproveAndSwitchToAcceptEdits?: () => void;
+  onApproveAndSwitchToBypass?: () => void;
   onDeny?: () => void;
 }
 
-function AlwaysAllowDropdown({
+// Check if tool is a file editing tool (Edit, Write)
+function isFileEditTool(toolName: string): boolean {
+  return toolName === 'Edit' || toolName === 'Write';
+}
+
+function ApprovalButtons({
+  toolName,
   onApprove,
   onApproveAndRemember,
   onApproveAndRememberGlobal,
+  onApproveAndSwitchToAcceptEdits,
+  onApproveAndSwitchToBypass,
   onDeny,
-}: AlwaysAllowDropdownProps) {
+}: ApprovalButtonsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const isEditTool = isFileEditTool(toolName);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -41,7 +53,7 @@ function AlwaysAllowDropdown({
 
   return (
     <div className="flex flex-wrap gap-2">
-      {/* Approve with dropdown for "always allow" options */}
+      {/* Approve with dropdown for additional options */}
       <div className="relative" ref={dropdownRef}>
         <div className="flex">
           <Button
@@ -62,27 +74,56 @@ function AlwaysAllowDropdown({
         </div>
 
         {isOpen && (
-          <div className="absolute left-0 top-full z-10 mt-1 w-48 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
-            <button
-              onClick={() => {
-                onApproveAndRemember?.();
-                setIsOpen(false);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-            >
-              <Monitor className="h-4 w-4" />
-              Always allow (session)
-            </button>
-            <button
-              onClick={() => {
-                onApproveAndRememberGlobal?.();
-                setIsOpen(false);
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-            >
-              <Globe className="h-4 w-4" />
-              Always allow (global)
-            </button>
+          <div className="absolute left-0 top-full z-10 mt-1 w-56 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+            {isEditTool ? (
+              // File edit tools: show mode-switching options
+              <>
+                <button
+                  onClick={() => {
+                    onApproveAndSwitchToAcceptEdits?.();
+                    setIsOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <Monitor className="h-4 w-4 text-blue-500" />
+                  Accept Edits mode
+                </button>
+                <button
+                  onClick={() => {
+                    onApproveAndSwitchToBypass?.();
+                    setIsOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <Globe className="h-4 w-4 text-red-500" />
+                  Bypass mode
+                </button>
+              </>
+            ) : (
+              // Other tools: show "always allow" options
+              <>
+                <button
+                  onClick={() => {
+                    onApproveAndRemember?.();
+                    setIsOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <Monitor className="h-4 w-4" />
+                  Always allow (session)
+                </button>
+                <button
+                  onClick={() => {
+                    onApproveAndRememberGlobal?.();
+                    setIsOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <Globe className="h-4 w-4" />
+                  Always allow (global)
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -109,6 +150,8 @@ interface ToolUseRendererProps {
   onApprove?: () => void;
   onApproveAndRemember?: () => void;
   onApproveAndRememberGlobal?: () => void;
+  onApproveAndSwitchToAcceptEdits?: () => void;
+  onApproveAndSwitchToBypass?: () => void;
   onDeny?: () => void;
 }
 
@@ -121,6 +164,8 @@ export function ToolUseRenderer({
   onApprove,
   onApproveAndRemember,
   onApproveAndRememberGlobal,
+  onApproveAndSwitchToAcceptEdits,
+  onApproveAndSwitchToBypass,
   onDeny
 }: ToolUseRendererProps) {
   // Render the appropriate tool component
@@ -240,10 +285,13 @@ export function ToolUseRenderer({
           Rejected
         </Badge>
       ) : (
-        <AlwaysAllowDropdown
+        <ApprovalButtons
+          toolName={toolName}
           onApprove={onApprove}
           onApproveAndRemember={onApproveAndRemember}
           onApproveAndRememberGlobal={onApproveAndRememberGlobal}
+          onApproveAndSwitchToAcceptEdits={onApproveAndSwitchToAcceptEdits}
+          onApproveAndSwitchToBypass={onApproveAndSwitchToBypass}
           onDeny={onDeny}
         />
       )}

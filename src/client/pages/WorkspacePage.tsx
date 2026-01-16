@@ -190,16 +190,20 @@ export function WorkspacePage() {
         activeTabId: sessionId,
       };
     });
+    // Clear done state when viewing the session
+    sessionManager.getSessionActions(sessionId)?.clearDone();
     // Close drawer on mobile after selecting
     setMobileDrawerOpen(false);
-  }, []);
+  }, [sessionManager]);
 
   const handleSelectTab = useCallback((sessionId: string) => {
     setState(prev => ({
       ...prev,
       activeTabId: sessionId,
     }));
-  }, []);
+    // Clear done state when viewing the session
+    sessionManager.getSessionActions(sessionId)?.clearDone();
+  }, [sessionManager]);
 
   const handleCloseTab = useCallback((sessionId: string) => {
     setState(prev => {

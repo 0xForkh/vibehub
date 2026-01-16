@@ -26,6 +26,7 @@ const createInitialSessionState = (sessionId: string): SessionState => ({
   slashCommands: [],
   allowedTools: [],
   permissionMode: 'default',
+  isDone: false,
 });
 
 /**
@@ -284,9 +285,10 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
       totalCostUsd?: number;
       contextWindow?: number;
       totalTokensUsed?: number;
+      isReplay?: boolean;
     }) => {
-      // Notify when Claude finishes (tab not focused)
-      if (document.hidden && Push.Permission.has()) {
+      // Notify when Claude finishes (tab not focused) - skip for replays
+      if (!data.isReplay && document.hidden && Push.Permission.has()) {
         Push.create('Claude finished', {
           body: 'Response complete - awaiting your input',
           tag: `result-${data.sessionId}`,
@@ -297,20 +299,29 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
         });
       }
 
-      if (data.totalTokensUsed !== undefined && data.contextWindow !== undefined) {
-        updateSessionState(data.sessionId, (s) => ({
-          ...s,
-          contextUsage: {
-            totalTokensUsed: data.totalTokensUsed as number,
-            contextWindow: data.contextWindow as number,
-            totalCostUsd: data.totalCostUsd || 0,
-          },
-        }));
-      }
+      updateSessionState(data.sessionId, (s) => ({
+        ...s,
+        // Only set isDone for fresh results, not replays on reconnect
+        isDone: data.isReplay ? s.isDone : true,
+        ...(data.totalTokensUsed !== undefined && data.contextWindow !== undefined
+          ? {
+              contextUsage: {
+                totalTokensUsed: data.totalTokensUsed as number,
+                contextWindow: data.contextWindow as number,
+                totalCostUsd: data.totalCostUsd || 0,
+              },
+            }
+          : {}),
+      }));
     };
 
     const handleThinking = ({ sessionId, thinking }: { sessionId: string; thinking: boolean }) => {
-      updateSessionState(sessionId, (state) => ({ ...state, thinking }));
+      updateSessionState(sessionId, (state) => ({
+        ...state,
+        thinking,
+        // Clear isDone when Claude starts thinking again
+        isDone: thinking ? false : state.isDone,
+      }));
     };
 
     const handleToolResult = ({ sessionId, toolUseId, result }: { sessionId: string; toolUseId: string; result: unknown }) => {
@@ -486,6 +497,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
             ...state,
             messages: [...state.messages, userMessage],
             error: null,
+            isDone: false,
           }));
 
           socket.emit('claude:message', {
@@ -578,6 +590,10 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
           // Optimistically update local state
           updateSessionState(sessionId, (state) => ({ ...state, permissionMode: mode }));
         },
+
+        clearDone: () => {
+          updateSessionState(sessionId, (state) => ({ ...state, isDone: false }));
+        },
       };
     },
     [socket, sessionStates, updateSessionState]
@@ -592,6 +608,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
         hasPendingPermission: state.pendingRequest !== null,
         isThinking: state.thinking,
         hasError: state.error !== null,
+        isDone: state.isDone,
       });
     });
     return notifications;

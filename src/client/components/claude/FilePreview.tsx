@@ -159,15 +159,15 @@ export function FilePreview({ sessionId, socket, path, isImage }: FilePreviewPro
   const lines = content.content.split('\n');
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col min-h-0">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-1.5 dark:border-gray-700 dark:bg-gray-800">
-        <span className="truncate text-xs text-gray-600 dark:text-gray-400">{path}</span>
+      <div className="flex items-center justify-between border-b border-gray-700 bg-gray-800 px-3 py-1.5 flex-shrink-0">
+        <span className="truncate text-xs text-gray-400">{path}</span>
         <div className="flex items-center gap-2">
           <span className="text-xs text-gray-500">{formatSize(content.size)}</span>
           <button
             onClick={handleCopy}
-            className="rounded p-1 hover:bg-gray-200 dark:hover:bg-gray-700"
+            className="rounded p-1 hover:bg-gray-700"
             title={copied ? 'Copied!' : 'Copy content'}
           >
             {copied ? (
@@ -180,12 +180,12 @@ export function FilePreview({ sessionId, socket, path, isImage }: FilePreviewPro
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto bg-gray-900 font-mono text-xs">
+      <div className="flex-1 overflow-auto min-h-0 bg-gray-900 font-mono text-xs">
         <table className="w-full border-collapse">
           <tbody>
             {lines.map((line, idx) => (
               <tr key={idx} className="hover:bg-gray-800">
-                <td className="select-none border-r border-gray-700 px-2 py-0 text-right text-gray-500">
+                <td className="select-none border-r border-gray-700 px-2 py-0 text-right text-gray-500 sticky left-0 bg-gray-900">
                   {idx + 1}
                 </td>
                 <td className="whitespace-pre px-2 py-0 text-gray-100">

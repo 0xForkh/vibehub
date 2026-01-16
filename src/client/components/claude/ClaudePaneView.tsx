@@ -106,6 +106,16 @@ export function ClaudePaneView({
     handleApproveRequest(requestId, true, true);
   };
 
+  const handleApproveAndSwitchToAcceptEdits = (requestId: string) => {
+    handleApproveRequest(requestId);
+    actions.updatePermissionMode('acceptEdits');
+  };
+
+  const handleApproveAndSwitchToBypass = (requestId: string) => {
+    handleApproveRequest(requestId);
+    actions.updatePermissionMode('bypassPermissions');
+  };
+
   const handleDenyRequest = (requestId: string) => {
     actions.respondToPermission(requestId, 'deny');
   };
@@ -393,6 +403,8 @@ export function ClaudePaneView({
           onApproveRequest={handleApproveRequest}
           onApproveAndRememberRequest={handleApproveAndRememberRequest}
           onApproveAndRememberGlobalRequest={handleApproveAndRememberGlobalRequest}
+          onApproveAndSwitchToAcceptEdits={handleApproveAndSwitchToAcceptEdits}
+          onApproveAndSwitchToBypass={handleApproveAndSwitchToBypass}
           onDenyRequest={handleDenyRequest}
           toolResults={toolResults}
           sessionId={sessionId}

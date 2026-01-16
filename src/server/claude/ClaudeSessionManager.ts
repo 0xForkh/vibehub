@@ -132,13 +132,14 @@ export class ClaudeSessionManager {
         });
       }
 
-      // Send context usage if available
+      // Send context usage if available (mark as replay so client doesn't show "done" indicator)
       if (existingSession.contextUsage) {
         this.io.to(socketId).emit('claude:result', {
           sessionId,
           totalTokensUsed: existingSession.contextUsage.totalTokensUsed,
           contextWindow: existingSession.contextUsage.contextWindow,
           totalCostUsd: existingSession.contextUsage.totalCostUsd,
+          isReplay: true,
         });
       }
 
@@ -264,13 +265,14 @@ export class ClaudeSessionManager {
       }
     }
 
-    // Send context usage to client if available
+    // Send context usage to client if available (mark as replay so client doesn't show "done" indicator)
     if (storedContextUsage) {
       this.io.to(socketId).emit('claude:result', {
         sessionId,
         totalTokensUsed: storedContextUsage.totalTokensUsed,
         contextWindow: storedContextUsage.contextWindow,
         totalCostUsd: storedContextUsage.totalCostUsd,
+        isReplay: true,
       });
     }
 

@@ -30,6 +30,7 @@ export interface SessionState {
   slashCommands: string[];
   allowedTools: string[];
   permissionMode: PermissionMode;
+  isDone: boolean; // Claude finished and is waiting for user input
 }
 
 /**
@@ -47,6 +48,7 @@ export interface SessionActions {
   updateAllowedTools: (tools: string[]) => void;
   updateGlobalAllowedTools: (tools: string[]) => void;
   updatePermissionMode: (mode: PermissionMode) => void;
+  clearDone: () => void;
 }
 
 /**
@@ -64,6 +66,7 @@ export interface SessionNotification {
   hasPendingPermission: boolean;
   isThinking: boolean;
   hasError: boolean;
+  isDone: boolean; // Claude finished and is waiting for user input
 }
 
 /**

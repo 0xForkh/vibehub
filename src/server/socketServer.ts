@@ -98,8 +98,7 @@ export async function server(
     .get('/session/:sessionId', client)
     .get('/', client)
     // Serve React app at base path
-    .get(basePath, client)
-    .get(`${basePath}/ssh/:user`, client);
+    .get(basePath, client);
 
   const sslBuffer: SSLBuffer = await loadSSL(ssl);
   // Use root path for socket.io since we're serving at root level now

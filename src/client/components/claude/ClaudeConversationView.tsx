@@ -20,6 +20,8 @@ interface ClaudeConversationViewProps {
   onApproveRequest?: (requestId: string) => void;
   onApproveAndRememberRequest?: (requestId: string) => void;
   onApproveAndRememberGlobalRequest?: (requestId: string) => void;
+  onApproveAndSwitchToAcceptEdits?: (requestId: string) => void;
+  onApproveAndSwitchToBypass?: (requestId: string) => void;
   onDenyRequest?: (requestId: string) => void;
   toolResults?: Map<string, unknown>;
   sessionId: string;
@@ -32,6 +34,8 @@ export function ClaudeConversationView({
   onApproveRequest,
   onApproveAndRememberRequest,
   onApproveAndRememberGlobalRequest,
+  onApproveAndSwitchToAcceptEdits,
+  onApproveAndSwitchToBypass,
   onDenyRequest,
   toolResults = new Map(),
   sessionId,
@@ -274,6 +278,8 @@ export function ClaudeConversationView({
                     onApprove={!hasDecision ? () => onApproveRequest?.(msg.permissionRequest!.requestId) : undefined}
                     onApproveAndRemember={!hasDecision ? () => onApproveAndRememberRequest?.(msg.permissionRequest!.requestId) : undefined}
                     onApproveAndRememberGlobal={!hasDecision ? () => onApproveAndRememberGlobalRequest?.(msg.permissionRequest!.requestId) : undefined}
+                    onApproveAndSwitchToAcceptEdits={!hasDecision ? () => onApproveAndSwitchToAcceptEdits?.(msg.permissionRequest!.requestId) : undefined}
+                    onApproveAndSwitchToBypass={!hasDecision ? () => onApproveAndSwitchToBypass?.(msg.permissionRequest!.requestId) : undefined}
                     onDeny={!hasDecision ? () => onDenyRequest?.(msg.permissionRequest!.requestId) : undefined}
                   />
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">

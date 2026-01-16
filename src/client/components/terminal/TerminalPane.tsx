@@ -1,13 +1,13 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { Terminal } from '@xterm/xterm';
-import { X, Circle, Terminal as TerminalIcon, ChevronUp, ChevronDown } from 'lucide-react';
+import { Circle, Terminal as TerminalIcon } from 'lucide-react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import { io, Socket } from 'socket.io-client';
 import { useTerminalSettings } from '../../hooks/useTerminalSettings';
 import { FlowControlClient } from '../../vibehub/flowcontrol';
-import { Button } from '../ui/button';
+import { ResizablePanel } from '../ui/ResizablePanel';
 
 interface TerminalPaneProps {
   sessionId: string;
@@ -21,14 +21,12 @@ export function TerminalPane({
   onClose,
 }: TerminalPaneProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const terminalInstanceRef = useRef<Terminal | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const initializedRef = useRef(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [isMinimized, setIsMinimized] = useState(false);
   const { fontSize } = useTerminalSettings();
 
   // Refit terminal helper
@@ -43,12 +41,10 @@ export function TerminalPane({
   // Initialize terminal only once when first opened
   useEffect(() => {
     if (!isOpen || initializedRef.current) return;
-    // Wait for refs to be available
-    if (!terminalRef.current || !containerRef.current) return;
+    if (!terminalRef.current) return;
 
     initializedRef.current = true;
 
-    // Initialize terminal
     const term = new Terminal({
       cursorBlink: true,
       fontSize,
@@ -86,14 +82,9 @@ export function TerminalPane({
     terminalInstanceRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Connect to socket
-    const socket = io({
-      path: '/socket.io',
-    });
-
+    const socket = io({ path: '/socket.io' });
     socketRef.current = socket;
 
-    // Flow control
     const fcClient = new FlowControlClient();
 
     socket.on('connect', () => {
@@ -110,7 +101,6 @@ export function TerminalPane({
     });
 
     socket.on('login', () => {
-      // Small delay to ensure container is laid out
       setTimeout(() => {
         fitAddon.fit();
         const { cols, rows } = term;
@@ -132,20 +122,16 @@ export function TerminalPane({
       term.write(`\r\n\x1b[31mError: ${err.message}\x1b[0m\r\n`);
     });
 
-    // Send terminal input to server
     term.onData((data) => {
       socket.emit('input', data);
     });
 
-    // Auto-copy on Shift+mouseup
     const handleMouseUp = (e: MouseEvent) => {
       if (!e.shiftKey) return;
       const selection = term.getSelection();
       if (!selection) return;
       try {
-        if (navigator.clipboard?.writeText) {
-          navigator.clipboard.writeText(selection);
-        }
+        navigator.clipboard?.writeText(selection);
       } catch (err) {
         console.error('Failed to copy:', err);
       }
@@ -154,7 +140,6 @@ export function TerminalPane({
     const termEl = terminalRef.current;
     termEl.addEventListener('mouseup', handleMouseUp);
 
-    // Handle container resize
     resizeObserverRef.current = new ResizeObserver(() => {
       if (fitAddonRef.current && terminalInstanceRef.current) {
         fitAddonRef.current.fit();
@@ -163,9 +148,8 @@ export function TerminalPane({
       }
     });
 
-    resizeObserverRef.current.observe(containerRef.current);
+    resizeObserverRef.current.observe(termEl);
 
-    // Cleanup on unmount
     return () => {
       resizeObserverRef.current?.disconnect();
       termEl.removeEventListener('mouseup', handleMouseUp);
@@ -175,13 +159,6 @@ export function TerminalPane({
     };
   }, [isOpen, sessionId, fontSize]);
 
-  // Refit when minimized state changes
-  useEffect(() => {
-    if (!isMinimized && initializedRef.current) {
-      setTimeout(refitTerminal, 50);
-    }
-  }, [isMinimized, refitTerminal]);
-
   // Update font size dynamically
   useEffect(() => {
     if (terminalInstanceRef.current) {
@@ -190,12 +167,12 @@ export function TerminalPane({
     }
   }, [fontSize, refitTerminal]);
 
-  // Focus terminal when expanded
+  // Focus terminal when opened
   useEffect(() => {
-    if (isOpen && !isMinimized && terminalInstanceRef.current) {
+    if (isOpen && terminalInstanceRef.current) {
       terminalInstanceRef.current.focus();
     }
-  }, [isOpen, isMinimized]);
+  }, [isOpen]);
 
   const handleClose = useCallback(() => {
     if (socketRef.current) {
@@ -212,47 +189,25 @@ export function TerminalPane({
     onClose();
   }, [onClose]);
 
-  if (!isOpen) return null;
-
   return (
-    <div
-      ref={containerRef}
-      className={`flex flex-col border-t border-gray-200 bg-gray-900 dark:border-gray-700 ${
-        isMinimized ? '' : 'max-h-[50vh] sm:max-h-[300px]'
-      }`}
+    <ResizablePanel
+      isOpen={isOpen}
+      onClose={handleClose}
+      title="Terminal"
+      icon={<TerminalIcon className="h-4 w-4" />}
+      statusIndicator={
+        <Circle className={`h-2 w-2 fill-current ${isConnected ? 'text-green-500' : 'text-gray-500'}`} />
+      }
+      defaultHeight={250}
+      minHeight={150}
+      maxHeight={500}
+      storageKey="terminal"
     >
-      {/* Header - always visible */}
-      <div className="flex items-center justify-between border-b border-gray-700 px-3 py-1.5">
-        <button
-          onClick={() => setIsMinimized(prev => !prev)}
-          className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-200"
-        >
-          <TerminalIcon className="h-4 w-4" />
-          <span className="font-medium">Terminal</span>
-          <Circle className={`h-2 w-2 fill-current ${isConnected ? 'text-green-500' : 'text-gray-500'}`} />
-          {isMinimized ? (
-            <ChevronUp className="h-3 w-3" />
-          ) : (
-            <ChevronDown className="h-3 w-3" />
-          )}
-        </button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleClose}
-          className="h-6 w-6 p-0 text-gray-400 hover:text-gray-200"
-          title="Close"
-        >
-          <X className="h-3 w-3" />
-        </Button>
-      </div>
-
-      {/* Terminal area - hidden when minimized but stays mounted */}
       <div
         ref={terminalRef}
-        className={`flex-1 overflow-hidden ${isMinimized ? 'hidden' : ''}`}
-        style={{ minHeight: isMinimized ? 0 : '200px', background: '#0a0a0a' }}
+        className="h-full w-full"
+        style={{ background: '#0a0a0a' }}
       />
-    </div>
+    </ResizablePanel>
   );
 }

@@ -262,7 +262,7 @@ export function FileTree({ sessionId, socket, onFileSelect, selectedPath, showHi
   }
 
   return (
-    <div className="overflow-auto">
+    <div className="py-1">
       {nodes.map((node) => (
         <TreeItem
           key={node.path}

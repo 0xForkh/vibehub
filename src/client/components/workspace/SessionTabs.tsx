@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect } from 'react';
-import { X, BrainCircuit, ChevronLeft, ChevronRight, AlertCircle, Loader2 } from 'lucide-react';
+import { X, BrainCircuit, ChevronLeft, ChevronRight, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import type { Session } from '../../hooks/useSessions';
 import type { SessionNotification } from '../../types/sessionState';
@@ -97,6 +97,7 @@ export function SessionTabs({
           const hasPendingPermission = notification?.hasPendingPermission && !isActive;
           const isThinking = notification?.isThinking && !isActive;
           const hasError = notification?.hasError && !isActive;
+          const isDone = notification?.isDone && !isActive;
 
           return (
             <div
@@ -106,6 +107,8 @@ export function SessionTabs({
                   ? 'bg-white text-gray-900 dark:bg-gray-800 dark:text-white'
                   : hasPendingPermission
                   ? 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50'
+                  : isDone
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50'
                   : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800/50 dark:hover:text-gray-200'
               }`}
               onClick={() => onSelectTab(session.id)}
@@ -120,7 +123,10 @@ export function SessionTabs({
                 {isThinking && !hasPendingPermission && (
                   <Loader2 className="absolute -right-1 -top-1 h-2.5 w-2.5 text-blue-400 animate-spin" />
                 )}
-                {hasError && !hasPendingPermission && !isThinking && (
+                {isDone && !hasPendingPermission && !isThinking && (
+                  <CheckCircle2 className="absolute -right-1 -top-1 h-2.5 w-2.5 text-green-500" />
+                )}
+                {hasError && !hasPendingPermission && !isThinking && !isDone && (
                   <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 text-red-500" />
                 )}
               </div>

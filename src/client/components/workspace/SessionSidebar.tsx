@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { BrainCircuit, Plus, ChevronLeft, ChevronRight, ChevronDown, MoreVertical, Pencil, Trash2, FolderOpen, Folder, GitBranch, AlertCircle, Loader2 } from 'lucide-react';
+import { BrainCircuit, Plus, ChevronLeft, ChevronRight, ChevronDown, MoreVertical, Pencil, Trash2, FolderOpen, Folder, GitBranch, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -359,7 +359,7 @@ export function SessionSidebar({
   return (
     <>
       <div
-        className="flex h-full flex-col border-r border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900"
+        className="relative flex h-full flex-col border-r border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900"
         style={{ width }}
       >
         {/* Header */}
@@ -517,7 +517,7 @@ export function SessionSidebar({
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-5 w-5 p-0 opacity-0 group-hover/folder:opacity-100"
+                        className="h-5 w-5 p-0"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleCreateInFolder(group.path);
@@ -539,6 +539,7 @@ export function SessionSidebar({
                       const hasPendingPermission = notification?.hasPendingPermission && !isActive;
                       const isThinking = notification?.isThinking && !isActive;
                       const hasError = notification?.hasError && !isActive;
+                      const isDone = notification?.isDone && !isActive;
 
                       return (
                         <div
@@ -548,6 +549,8 @@ export function SessionSidebar({
                               ? 'bg-gray-200 text-gray-900 dark:bg-gray-700 dark:text-white'
                               : hasPendingPermission
                               ? 'bg-orange-100 text-orange-700 hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:hover:bg-orange-900/50'
+                              : isDone
+                              ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50'
                               : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200'
                           }`}
                           onClick={() => !isRenaming && onSelectSession(session.id)}
@@ -565,7 +568,10 @@ export function SessionSidebar({
                             {isThinking && !hasPendingPermission && (
                               <Loader2 className="absolute -right-1 -top-1 h-2.5 w-2.5 text-blue-400 animate-spin" />
                             )}
-                            {hasError && !hasPendingPermission && !isThinking && (
+                            {isDone && !hasPendingPermission && !isThinking && (
+                              <CheckCircle2 className="absolute -right-1 -top-1 h-2.5 w-2.5 text-green-500" />
+                            )}
+                            {hasError && !hasPendingPermission && !isThinking && !isDone && (
                               <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 text-red-500" />
                             )}
                           </div>
@@ -606,7 +612,7 @@ export function SessionSidebar({
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
+                                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 touch:opacity-100"
                                 onClick={(e) => e.stopPropagation()}
                               >
                                 <MoreVertical className="h-3 w-3" />
@@ -642,7 +648,7 @@ export function SessionSidebar({
 
         {/* Resize handle */}
         <div
-          className={`absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-blue-500 ${
+          className={`absolute top-0 -right-1 h-full w-2 cursor-col-resize transition-colors hover:bg-blue-500/50 ${
             isResizing ? 'bg-blue-500' : ''
           }`}
           onMouseDown={handleResizeStart}

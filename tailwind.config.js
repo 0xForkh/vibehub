@@ -5,7 +5,11 @@ export default {
     "./src/client/index.html",
   ],
   theme: {
-    extend: {},
+    extend: {
+      screens: {
+        'touch': { 'raw': '(hover: none)' },
+      },
+    },
   },
   plugins: [
     // eslint-disable-next-line import/no-extraneous-dependencies, global-require
