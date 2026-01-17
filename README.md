@@ -1,20 +1,22 @@
 # Vibehub
 
-IDE for Claude sessions. Manage multiple Claude Code agents from a single web interface.
+IDE for Claude sessions. Manage multiple Claude Code agents from a single web
+interface.
 
 ## Features
 
 - **Multi-session management**: Multiple Claude sessions in one browser window
 - **Session persistence**: Sessions survive disconnects/restarts
 - **Claude Code integration**: AI-powered coding sessions via Claude Agent SDK
-- **Flexible layouts**: Horizontal, vertical, or grid arrangements with resizable panes
+- **Flexible layouts**: Horizontal, vertical, or grid arrangements with
+  resizable panes
 
 ## Requirements
 
 - Node.js >= 18
 - tmux
 - make, python, build-essential (for node-pty)
-- Claude Code CLI (optional, for AI sessions)
+- Claude Code CLI (`npm install -g @anthropic-ai/claude-code`)
 
 ## Install
 
@@ -32,26 +34,16 @@ pnpm start --port 3000
 
 # Development mode
 pnpm dev
-
-# With SSH host
-pnpm start --ssh-host example.com --ssh-user youruser
 ```
 
-Open `http://localhost:3000/dashboard` in your browser.
+Open `http://localhost:3000` in your browser.
 
 ## CLI Options
 
 ```
 --port, -p      Listen port (default: 3000)
---host          Listen host
---base, -b      Base path
---ssl-key       SSL key path
---ssl-cert      SSL certificate path
---ssh-host      SSH server host
---ssh-port      SSH server port
---ssh-user      SSH user
---ssh-auth      Auth method (default: "password")
---conf          Config file (JSON5)
+--host          Listen host (default: 0.0.0.0)
+--log-level     Log level (error, warn, info, debug)
 ```
 
 ## Architecture
@@ -79,11 +71,14 @@ Create Claude sessions from the dashboard. Permission modes:
 
 ## Dictation
 
-Voice dictation uses ElevenLabs for real-time speech-to-text. Set `ELEVENLABS_API_KEY` environment variable to enable.
+Voice dictation uses ElevenLabs for real-time speech-to-text. Set
+`ELEVENLABS_API_KEY` environment variable to enable.
 
 ### Microphone Access on Local Network
 
-Browsers require HTTPS for microphone access on non-localhost origins. For development on local network IPs (e.g., accessing via Tailscale), enable Chrome's insecure origins flag:
+Browsers require HTTPS for microphone access on non-localhost origins. For
+development on local network IPs (e.g., accessing via Tailscale), enable
+Chrome's insecure origins flag:
 
 1. Open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`
 2. Add your server URL (e.g., `http://192.168.1.100:3000`)
@@ -94,7 +89,7 @@ This allows microphone access over HTTP for the specified origins.
 ## Docker
 
 ```sh
-docker run --rm -p 3000:3000 vibehub/vibehub --ssh-host=<YOUR-IP>
+docker run --rm -p 3000:3000 vibehub/vibehub
 ```
 
 ## License

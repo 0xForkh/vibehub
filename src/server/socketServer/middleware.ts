@@ -37,18 +37,17 @@ export function redirect(
 }
 
 /**
- * Serves the favicon located by the given `path`.
+ * Serves the favicon.
  *
- * @param basePath - server base path
  * @returns middleware
  */
-export async function favicon(basePath: string): Promise<RequestHandler> {
+export async function favicon(): Promise<RequestHandler> {
   const path = assetsPath('client', 'favicon.ico');
 
   try {
     const icon = await fs.readFile(path);
     return (req: Request, res: Response, next: NextFunction): void => {
-      if (getPathName(req) !== `${basePath}/client/favicon.ico`) {
+      if (getPathName(req) !== '/client/favicon.ico') {
         next();
       } else if (req.method !== 'GET' && req.method !== 'HEAD') {
         res.statusCode = req.method === 'OPTIONS' ? 200 : 405;
@@ -63,12 +62,10 @@ export async function favicon(basePath: string): Promise<RequestHandler> {
           res.setHeader(key, value);
         });
 
-        // Validate freshness
         if (isFresh(req, res)) {
           res.statusCode = 304;
           res.end();
         } else {
-          // Send icon
           res.statusCode = 200;
           res.setHeader('Content-Length', icon.length);
           res.setHeader('Content-Type', 'image/x-icon');

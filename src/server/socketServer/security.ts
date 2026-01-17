@@ -2,9 +2,9 @@ import helmet from 'helmet';
 import type { Request, Response } from 'express';
 
 export const policies =
-  (allowIframe: boolean) =>
+  () =>
   (req: Request, res: Response, next: (err?: unknown) => void): void => {
-    const args: Record<string, unknown> = {
+    helmet({
       referrerPolicy: { policy: ['no-referrer-when-downgrade'] },
       contentSecurityPolicy: {
         directives: {
@@ -19,9 +19,6 @@ export const policies =
           ],
         },
       },
-      frameguard: false
-    };
-    if (!allowIframe) args.frameguard = { action: 'sameorigin' };
-
-    helmet(args)(req, res, next);
+      frameguard: { action: 'sameorigin' },
+    })(req, res, next);
   };

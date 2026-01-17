@@ -76,21 +76,12 @@ function normalizeStatusCode(status: number): string {
   return '5XX';
 }
 
-export function metricMiddleware(basePath: string): RequestHandler {
-  const metricsPath = `${basePath}/metrics`;
-
-  /**
-   * Corresponds to the R(equest rate), E(error rate), and D(uration of requests),
-   * of the RED metrics.
-   */
+export function metricMiddleware(): RequestHandler {
   return ResponseTime((req: Request, res: Response, time: number): void => {
     const { originalUrl, method } = req;
-    // will replace ids from the route with `#val` placeholder this serves to
-    // measure the same routes, e.g., /image/id1, and /image/id2, will be
-    // treated as the same route
     const route = normalizePath(originalUrl);
 
-    if (route !== metricsPath) {
+    if (route !== '/metrics') {
       const labels = {
         route,
         method,
@@ -98,17 +89,13 @@ export function metricMiddleware(basePath: string): RequestHandler {
       };
 
       requestCount.inc(labels);
-
-      // observe normalizing to seconds
       requestDuration.observe(labels, time / 1000);
 
-      // observe request length
       const reqLength = req.get('Content-Length');
       if (reqLength) {
         requestLength.observe(labels, Number(reqLength));
       }
 
-      // observe response length
       const resLength = res.get('Content-Length');
       if (resLength) {
         responseLength.observe(labels, Number(resLength));
