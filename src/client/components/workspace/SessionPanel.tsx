@@ -8,6 +8,7 @@ interface SessionPanelProps {
   openTabIds: string[];
   activeSessionId: string | null;
   onCloseTab: (sessionId: string) => void;
+  onDelete?: (sessionId: string, cleanupWorktree: boolean) => void;
   onFork?: (newSessionId: string) => void;
   sessionManager: SessionManagerResult;
 }
@@ -16,7 +17,8 @@ export function SessionPanel({
   sessions,
   openTabIds,
   activeSessionId,
-  onCloseTab,
+  onCloseTab: _onCloseTab,
+  onDelete,
   onFork,
   sessionManager,
 }: SessionPanelProps) {
@@ -67,11 +69,12 @@ export function SessionPanel({
               sessionId={session.id}
               sessionName={session.name}
               workingDir={session.claudeMetadata?.workingDir}
+              worktreePath={session.claudeMetadata?.worktreePath}
               state={state}
               actions={actions}
               globalAllowedTools={sessionManager.globalState.globalAllowedTools}
               socket={sessionManager.socket}
-              onClose={() => onCloseTab(session.id)}
+              onDelete={onDelete}
               onFork={onFork}
               showHeader={true}
               className="h-full"

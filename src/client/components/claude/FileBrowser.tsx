@@ -36,10 +36,19 @@ export function FileBrowser({ sessionId, socket, isOpen, onClose }: FileBrowserP
     setMobileShowPreview(false);
   }, []);
 
+  // On mobile, close goes back to list first, then closes modal
+  const handleClose = useCallback(() => {
+    if (mobileShowPreview && window.innerWidth < 768) {
+      setMobileShowPreview(false);
+    } else {
+      onClose();
+    }
+  }, [mobileShowPreview, onClose]);
+
   return (
     <ModalPanel
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title="File Browser"
       icon={<FolderOpen className="h-4 w-4 text-yellow-500" />}
       width="4xl"

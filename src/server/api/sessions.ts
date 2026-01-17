@@ -58,7 +58,7 @@ router.get('/', async (_req: Request, res: Response) => {
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const { name, command, cols, rows, sshHost, sshPort } = req.body;
+    const { name, command, cols, rows } = req.body;
 
     if (!name) {
       res.status(400).json({ error: 'Session name is required' });
@@ -71,9 +71,6 @@ router.post('/', async (req: Request, res: Response) => {
     const session = await sessionStore.createSession(name, cmd, {
       cols: cols || 80,
       rows: rows || 24,
-      command: command || 'bash',
-      sshHost,
-      sshPort,
     });
 
     broadcastSessionsUpdate();

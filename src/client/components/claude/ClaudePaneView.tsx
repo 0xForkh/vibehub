@@ -1,4 +1,4 @@
-import { X, Circle, ChevronDown, ChevronRight, ListTodo, CheckCircle2, Clock, GitBranch, GitCommitHorizontal, Terminal, FolderOpen, Settings, Shield, ShieldCheck, ShieldOff, FileEdit } from 'lucide-react';
+import { Trash2, Circle, ChevronDown, ChevronRight, ListTodo, CheckCircle2, Clock, GitBranch, GitCommitHorizontal, Terminal, FolderOpen, Settings, Shield, ShieldCheck, ShieldOff, FileEdit } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -17,11 +17,12 @@ interface ClaudePaneViewProps {
   sessionId: string;
   sessionName?: string;
   workingDir?: string;
+  worktreePath?: string;
   state: SessionState;
   actions: SessionActions;
   globalAllowedTools: string[];
   socket: Socket | null;
-  onClose?: () => void;
+  onDelete?: (sessionId: string, cleanupWorktree: boolean) => void;
   onFork?: (newSessionId: string) => void;
   showHeader?: boolean;
   className?: string;
@@ -31,11 +32,12 @@ export function ClaudePaneView({
   sessionId,
   sessionName,
   workingDir,
+  worktreePath,
   state,
   actions,
   globalAllowedTools,
   socket,
-  onClose,
+  onDelete,
   onFork,
   showHeader = true,
   className = '',
@@ -47,6 +49,7 @@ export function ClaudePaneView({
   const [showAllowedTools, setShowAllowedTools] = useState(false);
   const [showPermissionModeMenu, setShowPermissionModeMenu] = useState(false);
   const [showForkDialog, setShowForkDialog] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const {
     isConnected,
@@ -56,7 +59,6 @@ export function ClaudePaneView({
     pendingRequest,
     error,
     toolResults,
-    contextUsage,
     slashCommands,
     allowedTools,
     permissionMode,
@@ -174,9 +176,9 @@ export function ClaudePaneView({
       )}
       {showHeader && (
         <div className="flex flex-col border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-          <div className="flex items-center gap-1 px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
-            {/* Status badges + buttons */}
-            <div className="flex flex-1 items-center gap-1 overflow-x-auto sm:gap-1.5 sm:overflow-visible">
+          <div className="flex items-center justify-between gap-2 px-2 py-1.5 sm:px-3 sm:py-2">
+            {/* Left: Status indicators */}
+            <div className="flex items-center gap-1 sm:gap-1.5">
               <Badge variant={isConnected ? 'default' : 'secondary'} className="text-xs">
                 <Circle className={`mr-1 h-2 w-2 fill-current ${isConnected ? 'text-green-500' : 'text-gray-400'}`} />
                 <span className="hidden md:inline">{isConnected ? 'Connected' : 'Disconnected'}</span>
@@ -206,149 +208,182 @@ export function ClaudePaneView({
                   )}
                 </button>
               )}
-              {/* Context Usage Display */}
-              {contextUsage && (
-                <div className="hidden items-center gap-1.5 rounded-md bg-gray-100 px-2 py-1 text-xs dark:bg-gray-700 md:flex">
-                  <div className="flex items-center gap-1">
-                    <div
-                      className="h-2 w-12 overflow-hidden rounded-full bg-gray-300 dark:bg-gray-600"
-                      title={`${contextUsage.totalTokensUsed.toLocaleString()} / ${contextUsage.contextWindow.toLocaleString()} tokens used`}
-                    >
-                      <div
-                        className={`h-full transition-all ${
-                          (contextUsage.totalTokensUsed / contextUsage.contextWindow) > 0.8
-                            ? 'bg-red-500'
-                            : (contextUsage.totalTokensUsed / contextUsage.contextWindow) > 0.6
-                            ? 'bg-yellow-500'
-                            : 'bg-green-500'
-                        }`}
-                        style={{
-                          width: `${Math.min(100, (contextUsage.totalTokensUsed / contextUsage.contextWindow) * 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="text-gray-600 dark:text-gray-300">
-                      {Math.round((contextUsage.totalTokensUsed / contextUsage.contextWindow) * 100)}%
-                    </span>
-                  </div>
-                  <span className="text-gray-400">|</span>
-                  <span className="text-gray-600 dark:text-gray-300">
-                    ${contextUsage.totalCostUsd.toFixed(2)}
-                  </span>
-                </div>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowFileBrowser(prev => !prev)}
-                disabled={!isConnected}
-                className={`h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8 ${showFileBrowser ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
-                title="File browser"
-              >
-                <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowGitPanel(prev => !prev)}
-                disabled={!isConnected}
-                className={`h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8 ${showGitPanel ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
-                title="Git status"
-              >
-                <GitCommitHorizontal className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowTerminal(prev => !prev)}
-                disabled={!isConnected}
-                className={`h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8 ${showTerminal ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
-                title="Terminal (Ctrl+`)"
-              >
-                <Terminal className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              </Button>
-              {/* Permission Mode Dropdown */}
-              <div className="relative">
+            </div>
+
+            {/* Right: Action buttons */}
+            <div className="flex items-center gap-0.5 sm:gap-1">
+              {/* Panel toggles */}
+              <div className="flex items-center">
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setShowPermissionModeMenu(prev => !prev)}
+                  onClick={() => setShowFileBrowser(prev => !prev)}
                   disabled={!isConnected}
-                  className={`flex h-7 flex-shrink-0 items-center gap-1 px-1.5 sm:h-8 sm:gap-1.5 sm:px-2 ${showPermissionModeMenu ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
-                  title={`Permission mode: ${permissionModeConfig[permissionMode].description}`}
+                  className={`h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8 ${showFileBrowser ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
+                  title="File browser"
                 >
-                  {(() => {
-                    const ModeIcon = permissionModeConfig[permissionMode].icon;
-                    return <ModeIcon className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${permissionModeConfig[permissionMode].color}`} />;
-                  })()}
-                  <span className="hidden text-xs md:inline">{permissionModeConfig[permissionMode].label}</span>
-                  <ChevronDown className="hidden h-3 w-3 text-gray-400 md:block" />
+                  <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Button>
-                {showPermissionModeMenu && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-40"
-                      onClick={() => setShowPermissionModeMenu(false)}
-                    />
-                    <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                      {(Object.keys(permissionModeConfig) as PermissionMode[]).map((mode) => {
-                        const config = permissionModeConfig[mode];
-                        const ModeIcon = config.icon;
-                        const isActive = mode === permissionMode;
-                        return (
-                          <button
-                            key={mode}
-                            onClick={() => handlePermissionModeChange(mode)}
-                            className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
-                              isActive ? 'bg-gray-100 dark:bg-gray-700' : ''
-                            }`}
-                          >
-                            <ModeIcon className={`h-4 w-4 ${config.color}`} />
-                            <div className="flex-1">
-                              <div className="font-medium text-gray-900 dark:text-white">{config.label}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400">{config.description}</div>
-                            </div>
-                            {isActive && (
-                              <CheckCircle2 className="h-4 w-4 text-green-500" />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowGitPanel(prev => !prev)}
+                  disabled={!isConnected}
+                  className={`h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8 ${showGitPanel ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
+                  title="Git status"
+                >
+                  <GitCommitHorizontal className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowTerminal(prev => !prev)}
+                  disabled={!isConnected}
+                  className={`h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8 ${showTerminal ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
+                  title="Terminal (Ctrl+`)"
+                >
+                  <Terminal className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                </Button>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowAllowedTools(true)}
-                disabled={!isConnected}
-                className="h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8"
-                title="Allowed tools settings"
-              >
-                <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-              </Button>
-              {onFork && (
+
+              {/* Separator */}
+              <div className="mx-1 hidden h-4 w-px bg-gray-300 dark:bg-gray-600 sm:block" />
+
+              {/* Settings */}
+              <div className="flex items-center">
+                {/* Permission Mode Dropdown */}
+                <div className="relative">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowPermissionModeMenu(prev => !prev)}
+                    disabled={!isConnected}
+                    className={`flex h-7 flex-shrink-0 items-center gap-1 px-1.5 sm:h-8 sm:gap-1.5 sm:px-2 ${showPermissionModeMenu ? 'bg-gray-200 dark:bg-gray-600' : ''}`}
+                    title={`Permission mode: ${permissionModeConfig[permissionMode].description}`}
+                  >
+                    {(() => {
+                      const ModeIcon = permissionModeConfig[permissionMode].icon;
+                      return <ModeIcon className={`h-3.5 w-3.5 sm:h-4 sm:w-4 ${permissionModeConfig[permissionMode].color}`} />;
+                    })()}
+                    <span className="hidden text-xs md:inline">{permissionModeConfig[permissionMode].label}</span>
+                    <ChevronDown className="hidden h-3 w-3 text-gray-400 md:block" />
+                  </Button>
+                  {showPermissionModeMenu && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40"
+                        onClick={() => setShowPermissionModeMenu(false)}
+                      />
+                      <div className="absolute right-0 top-full z-50 mt-1 min-w-[180px] rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                        {(Object.keys(permissionModeConfig) as PermissionMode[]).map((mode) => {
+                          const config = permissionModeConfig[mode];
+                          const ModeIcon = config.icon;
+                          const isActive = mode === permissionMode;
+                          return (
+                            <button
+                              key={mode}
+                              onClick={() => handlePermissionModeChange(mode)}
+                              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                                isActive ? 'bg-gray-100 dark:bg-gray-700' : ''
+                              }`}
+                            >
+                              <ModeIcon className={`h-4 w-4 ${config.color}`} />
+                              <div className="flex-1">
+                                <div className="font-medium text-gray-900 dark:text-white">{config.label}</div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">{config.description}</div>
+                              </div>
+                              {isActive && (
+                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={handleFork}
+                  onClick={() => setShowAllowedTools(true)}
                   disabled={!isConnected}
-                  className="hidden h-7 w-7 flex-shrink-0 p-0 sm:flex sm:h-8 sm:w-8"
-                  title="Fork session"
+                  className="h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8"
+                  title="Allowed tools settings"
                 >
-                  <GitBranch className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Button>
-              )}
-              {onClose && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onClose}
-                  className="hidden h-7 w-7 flex-shrink-0 p-0 sm:flex sm:h-8 sm:w-8"
-                >
-                  <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                </Button>
+              </div>
+
+              {/* Session actions */}
+              {(onFork || onDelete) && (
+                <>
+                  <div className="mx-1 hidden h-4 w-px bg-gray-300 dark:bg-gray-600 sm:block" />
+                  <div className="hidden items-center sm:flex">
+                    {onFork && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleFork}
+                        disabled={!isConnected}
+                        className="h-7 w-7 flex-shrink-0 p-0 sm:h-8 sm:w-8"
+                        title="Fork session"
+                      >
+                        <GitBranch className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      </Button>
+                    )}
+                    {onDelete && (
+                      <div className="relative">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowDeleteConfirm(true)}
+                          className="h-7 w-7 flex-shrink-0 p-0 text-gray-500 hover:text-red-500 sm:h-8 sm:w-8"
+                          title="Delete session"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                        </Button>
+                        {showDeleteConfirm && (
+                          <>
+                            <div
+                              className="fixed inset-0 z-40"
+                              onClick={() => setShowDeleteConfirm(false)}
+                            />
+                            <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                              <p className="mb-3 text-sm text-gray-700 dark:text-gray-300">
+                                Delete "{sessionName || 'this session'}"?
+                              </p>
+                              {worktreePath && (
+                                <p className="mb-3 text-xs text-yellow-600 dark:text-yellow-400">
+                                  This will also remove the git worktree.
+                                </p>
+                              )}
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setShowDeleteConfirm(false)}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => {
+                                    onDelete(sessionId, !!worktreePath);
+                                    setShowDeleteConfirm(false);
+                                  }}
+                                  className="bg-red-600 hover:bg-red-700"
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           </div>

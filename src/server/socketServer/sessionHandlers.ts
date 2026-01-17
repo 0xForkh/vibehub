@@ -20,7 +20,6 @@ export function registerSessionHandlers(io: Server): void {
         const session = await sessionStore.createSession(name, cmd, {
           cols: cols || 80,
           rows: rows || 24,
-          command,
         });
 
         socket.emit('session:created', { session });

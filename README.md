@@ -50,7 +50,7 @@ Open `http://localhost:3000` in your browser.
 
 - **Frontend**: React 19, xterm.js, Socket.IO, Tailwind CSS
 - **Backend**: Node.js, Express, Socket.IO, node-pty, tmux
-- **Storage**: Redis or in-memory with file-based metadata backup
+- **Storage**: Redis (with persistence) or in-memory
 - **Build**: esbuild, TypeScript, PostCSS
 
 ## Claude Code Sessions

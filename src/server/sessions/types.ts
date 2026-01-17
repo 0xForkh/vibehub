@@ -1,9 +1,6 @@
 export interface SessionMetadata {
   cols: number;
   rows: number;
-  command?: string;
-  sshHost?: string;
-  sshPort?: number;
 }
 
 export interface ClaudeMetadata {

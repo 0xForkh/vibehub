@@ -357,6 +357,7 @@ export function WorkspacePage() {
             openTabIds={state.openTabIds}
             activeSessionId={state.activeTabId}
             onCloseTab={handleCloseTab}
+            onDelete={handleDeleteSession}
             onFork={handleFork}
             sessionManager={sessionManager}
           />

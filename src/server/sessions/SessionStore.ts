@@ -1,16 +1,13 @@
 import { randomUUID } from 'crypto';
 import { logger as getLogger } from '../../shared/logger.js';
 import { getStorageBackend } from '../database/redis.js';
-import { FileSessionMetadataStore } from './FileSessionMetadataStore.js';
 import { TmuxManager } from './TmuxManager.js';
-import type { SessionFileMetadata } from './FileSessionMetadataStore.js';
 import type { Session, SessionMetadata, ClaudeMetadata, GlobalClaudeSettings } from './types.js';
 import type { StorageBackend } from '../database/StorageBackend.js';
 
 export class SessionStore {
   private storage: StorageBackend | null = null;
   private tmuxManager = new TmuxManager();
-  private fileStore = new FileSessionMetadataStore();
   private logger = getLogger();
 
   private async getStorage(): Promise<StorageBackend> {
@@ -51,17 +48,6 @@ export class SessionStore {
       metadata,
       status: 'active',
     };
-
-    // Store persistent metadata in file
-    const fileMetadata: SessionFileMetadata = {
-      sessionId,
-      tmuxSessionName,
-      name,
-      sshHost: metadata.sshHost,
-      sshPort: metadata.sshPort,
-      createdAt: session.createdAt,
-    };
-    await this.fileStore.write(fileMetadata);
 
     // Store in storage backend (stringify metadata)
     const storage = await this.getStorage();
@@ -106,15 +92,6 @@ export class SessionStore {
       claudeMetadata,
       status: 'active',
     };
-
-    // Store persistent metadata in file
-    const fileMetadata: SessionFileMetadata = {
-      sessionId,
-      tmuxSessionName: `claude_${sessionId.slice(0, 8)}`, // Unique identifier for file storage
-      name,
-      createdAt: session.createdAt,
-    };
-    await this.fileStore.write(fileMetadata);
 
     // Store in storage backend (stringify metadata and claudeMetadata)
     const storage = await this.getStorage();
@@ -186,23 +163,6 @@ export class SessionStore {
       if (session.type === 'terminal' && session.tmuxSessionName) {
         await this.tmuxManager.renameSession(session.tmuxSessionName, updated.tmuxSessionName);
       }
-
-      // Update file metadata with new name
-      try {
-        const fileKey = session.type === 'terminal' ? session.tmuxSessionName : `claude_${session.id.slice(0, 8)}`;
-        const fileMetadata: SessionFileMetadata = {
-          sessionId: updated.id,
-          tmuxSessionName: fileKey,
-          name: updated.name,
-          sshHost: updated.metadata.sshHost,
-          sshPort: updated.metadata.sshPort,
-          createdAt: updated.createdAt,
-        };
-        await this.fileStore.write(fileMetadata);
-        this.logger.debug('Updated file metadata after rename', { sessionId, newName: updated.name });
-      } catch (err) {
-        this.logger.warn('Failed to update file metadata after rename', { err, sessionId });
-      }
     }
 
     const storage = await this.getStorage();
@@ -265,14 +225,6 @@ export class SessionStore {
       }
     }
 
-    // Remove metadata file
-    try {
-      const fileKey = session.type === 'terminal' ? session.tmuxSessionName : `claude_${sessionId.slice(0, 8)}`;
-      await this.fileStore.delete(fileKey);
-    } catch (err) {
-      this.logger.warn('Failed to delete session metadata file', { err, sessionId });
-    }
-
     // Remove from storage backend
     const storage = await this.getStorage();
     await storage.del(`sessions:${sessionId}`);
@@ -319,69 +271,24 @@ export class SessionStore {
     const tmuxSessions = await this.tmuxManager.listSessions();
     const storedSessions = await this.listSessions();
 
-    // Find tmux sessions that aren't in our store (support both old wetty_ and new vibehub_ prefixes)
-    const vibehubTmuxSessions = tmuxSessions.filter((s) => s.name.startsWith('vibehub_') || s.name.startsWith('wetty_'));
+    // Find tmux sessions that aren't in our store
+    const vibehubTmuxSessions = tmuxSessions.filter((s) => s.name.startsWith('vibehub_') || s.name.startsWith('claude_'));
 
     const storage = await this.getStorage();
     for (const tmuxSession of vibehubTmuxSessions) {
       const sessionId = await storage.get(`sessions:tmux:${tmuxSession.name}`);
       if (!sessionId) {
-        // Check if we have a metadata file for this session
-        const fileMetadata = await this.fileStore.read(tmuxSession.name);
-
-        if (fileMetadata) {
-          // Session has metadata file - recreate it in storage
-          this.logger.info('Recovering orphaned session from file', {
-            tmuxSessionName: tmuxSession.name,
-            sessionId: fileMetadata.sessionId,
-            name: fileMetadata.name
-          });
-
-          const recoveredSession: Session = {
-            id: fileMetadata.sessionId,
-            name: fileMetadata.name,
-            type: 'terminal',
-            tmuxSessionName: fileMetadata.tmuxSessionName,
-            createdAt: fileMetadata.createdAt,
-            lastAccessedAt: new Date().toISOString(),
-            metadata: {
-              cols: 80, // Default terminal size
-              rows: 24,
-              sshHost: fileMetadata.sshHost,
-              sshPort: fileMetadata.sshPort,
-            },
-            status: 'detached',
-          };
-
-          // Add to storage
-          const dataToStore: Record<string, string> = {
-            id: recoveredSession.id,
-            name: recoveredSession.name,
-            type: recoveredSession.type,
-            tmuxSessionName: recoveredSession.tmuxSessionName,
-            createdAt: recoveredSession.createdAt,
-            lastAccessedAt: recoveredSession.lastAccessedAt,
-            status: recoveredSession.status,
-            metadata: JSON.stringify(recoveredSession.metadata),
-          };
-          await storage.hset(`sessions:${recoveredSession.id}`, dataToStore);
-          await storage.sadd('sessions:all', recoveredSession.id);
-          await storage.set(`sessions:tmux:${tmuxSession.name}`, recoveredSession.id);
-
-          this.logger.info('Session recovered successfully', { sessionId: recoveredSession.id });
-        } else {
-          // No metadata file - truly orphaned, kill it
-          this.logger.warn('Found orphaned tmux session without metadata, killing it', {
+        // Orphaned tmux session not in storage - kill it
+        this.logger.warn('Found orphaned tmux session, killing it', {
+          tmuxSessionName: tmuxSession.name
+        });
+        try {
+          await this.tmuxManager.killSession(tmuxSession.name);
+        } catch (err) {
+          this.logger.error('Failed to kill orphaned tmux session', {
+            err,
             tmuxSessionName: tmuxSession.name
           });
-          try {
-            await this.tmuxManager.killSession(tmuxSession.name);
-          } catch (err) {
-            this.logger.error('Failed to kill orphaned tmux session', {
-              err,
-              tmuxSessionName: tmuxSession.name
-            });
-          }
         }
       }
     }
@@ -430,15 +337,6 @@ export class SessionStore {
       },
       status: 'active',
     };
-
-    // Store persistent metadata in file
-    const fileMetadata: SessionFileMetadata = {
-      sessionId: newSessionId,
-      tmuxSessionName: `claude_${newSessionId.slice(0, 8)}`,
-      name: forkedSession.name,
-      createdAt: forkedSession.createdAt,
-    };
-    await this.fileStore.write(fileMetadata);
 
     // Store in storage backend
     const storage = await this.getStorage();
