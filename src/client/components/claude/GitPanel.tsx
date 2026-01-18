@@ -1,4 +1,4 @@
-import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, ArrowLeft, GitCommitHorizontal } from 'lucide-react';
+import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { DiffView, DiffModeEnum } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
@@ -163,12 +163,6 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
     }
   }, [workingDir]);
 
-  const closeDiffView = () => {
-    setSelectedFile(null);
-    setDiffContent(null);
-    setDiffError(null);
-  };
-
   const handleCommit = useCallback(async () => {
     if (!workingDir || isCommitting) return;
 
@@ -261,7 +255,7 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
           </span>
         )
       }
-      width="4xl"
+      width="6xl"
       toolbar={
         <div className="flex items-center gap-1">
           {changeCount > 0 && (
@@ -290,274 +284,273 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
         </div>
       }
     >
-      {/* Content */}
-      <div className="flex-1 overflow-auto bg-white min-h-0 dark:bg-gray-900" style={{ maxHeight: '70vh' }}>
-        {selectedFile ? (
-          // Diff View
-          <div className="flex flex-col h-full">
-            {/* Diff Header */}
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={closeDiffView}
-                className="h-6 w-6 p-0"
-                title="Back to file list"
-              >
-                <ArrowLeft className="h-3.5 w-3.5" />
-              </Button>
-              <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
-                {selectedFile.path}
-              </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                ({selectedFile.staged ? 'staged' : 'unstaged'})
-              </span>
-            </div>
+      {/* Content - Side by side layout */}
+      <div className="flex-1 flex min-h-0 bg-white dark:bg-gray-900" style={{ maxHeight: '70vh' }}>
+        {/* Left Panel - File List */}
+        <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-auto p-3">
+          {isCommitting || commitResult ? (
+            // Committing / Result View
+            <div>
+              {/* Status header */}
+              <div className={`rounded-md p-3 mb-3 ${
+                commitResult
+                  ? commitResult.success
+                    ? 'bg-green-50 dark:bg-green-900/20'
+                    : 'bg-red-50 dark:bg-red-900/20'
+                  : 'bg-blue-50 dark:bg-blue-900/20'
+              }`}>
+                <div className="flex items-center gap-2">
+                  {isCommitting && (
+                    <GitCommitHorizontal className="h-4 w-4 animate-pulse text-blue-500" />
+                  )}
+                  <div className={`text-sm font-medium ${
+                    commitResult
+                      ? commitResult.success
+                        ? 'text-green-700 dark:text-green-300'
+                        : 'text-red-700 dark:text-red-300'
+                      : 'text-blue-700 dark:text-blue-300'
+                  }`}>
+                    {commitResult
+                      ? commitResult.success
+                        ? '✓ Commit successful'
+                        : `✗ ${commitResult.error || 'Commit failed'}`
+                      : commitStatus || 'Starting...'}
+                  </div>
+                </div>
+              </div>
 
-            {/* Diff Content */}
-            <div className="flex-1 overflow-auto">
-              {diffLoading ? (
-                <div className="flex items-center justify-center h-32 text-sm text-gray-500">
-                  Loading diff...
+              {/* Messages from Claude */}
+              {commitMessages.length > 0 && (
+                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 mb-3 max-h-64 overflow-y-auto">
+                  <div className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
+                    {commitMessages.map((msg, i) => (
+                      <div key={i} className={i > 0 ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-800' : ''}>
+                        {msg}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ) : diffError ? (
-                <div className="flex items-center justify-center h-32 text-sm text-red-500">
-                  {diffError}
-                </div>
-              ) : !diffContent ? (
-                <div className="flex items-center justify-center h-32 text-sm text-gray-500">
-                  No changes to display
-                </div>
-              ) : (
-                <DiffView
-                  data={{
-                    newFile: { fileName: selectedFile.path },
-                    hunks: [diffContent],
+              )}
+
+              {/* Back button (only when done) */}
+              {commitResult && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setCommitResult(null);
+                    setCommitMessages([]);
+                    setCommitStatus('');
                   }}
-                  diffViewFontSize={12}
-                  diffViewHighlight
-                  diffViewMode={DiffModeEnum.Unified}
-                />
+                  className="w-full"
+                >
+                  Back to changes
+                </Button>
               )}
             </div>
-          </div>
-        ) : isCommitting || commitResult ? (
-          // Committing / Result View
-          <div className="p-3">
-            {/* Status header */}
-            <div className={`rounded-md p-3 mb-3 ${
-              commitResult
-                ? commitResult.success
-                  ? 'bg-green-50 dark:bg-green-900/20'
-                  : 'bg-red-50 dark:bg-red-900/20'
-                : 'bg-blue-50 dark:bg-blue-900/20'
-            }`}>
-              <div className="flex items-center gap-2">
-                {isCommitting && (
-                  <GitCommitHorizontal className="h-4 w-4 animate-pulse text-blue-500" />
+          ) : !workingDir ? (
+            <div className="text-center text-sm text-gray-500">No working directory</div>
+          ) : error ? (
+            <div className="text-center text-sm text-red-500">{error}</div>
+          ) : isLoading && !status ? (
+            <div className="text-center text-sm text-gray-500">Loading...</div>
+          ) : (
+            <div className="space-y-4">
+              {/* Branch Selector */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowBranchList(!showBranchList)}
+                  className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
+                >
+                  <div className="flex items-center gap-2">
+                    <GitBranch className="h-4 w-4 text-gray-500" />
+                    <span className="font-medium text-gray-900 dark:text-white truncate">
+                      {status?.branch || 'Loading...'}
+                    </span>
+                  </div>
+                  <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform flex-shrink-0 ${showBranchList ? 'rotate-180' : ''}`} />
+                </button>
+
+                {showBranchList && (
+                  <>
+                    <div className="fixed inset-0 z-40" onClick={() => setShowBranchList(false)} />
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                      {branches.map((branch) => (
+                        <div
+                          key={branch.name}
+                          className={`flex items-center gap-2 px-3 py-2 text-sm ${
+                            branch.isCurrent
+                              ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                              : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
+                          }`}
+                        >
+                          <GitBranch className={`h-3.5 w-3.5 ${branch.isRemote ? 'text-gray-400' : ''}`} />
+                          <span className={branch.isRemote ? 'text-gray-500' : ''}>
+                            {branch.name}
+                          </span>
+                          {branch.isCurrent && (
+                            <span className="ml-auto text-xs text-blue-500">current</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
-                <div className={`text-sm font-medium ${
-                  commitResult
-                    ? commitResult.success
-                      ? 'text-green-700 dark:text-green-300'
-                      : 'text-red-700 dark:text-red-300'
-                    : 'text-blue-700 dark:text-blue-300'
-                }`}>
-                  {commitResult
-                    ? commitResult.success
-                      ? '✓ Commit successful'
-                      : `✗ ${commitResult.error || 'Commit failed'}`
-                    : commitStatus || 'Starting...'}
-                </div>
               </div>
-            </div>
 
-            {/* Messages from Claude */}
-            {commitMessages.length > 0 && (
-              <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 mb-3 max-h-64 overflow-y-auto">
-                <div className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                  {commitMessages.map((msg, i) => (
-                    <div key={i} className={i > 0 ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-800' : ''}>
-                      {msg}
+              {/* Changes Section */}
+              {status && (
+                <div className="space-y-3">
+                  {/* Staged Changes */}
+                  {status.staged.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => toggleSection('staged')}
+                        className="flex w-full items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                      >
+                        <ChevronRight className={`h-4 w-4 transition-transform ${expandedSections.staged ? 'rotate-90' : ''}`} />
+                        <span>Staged ({status.staged.length})</span>
+                      </button>
+                      {expandedSections.staged && (
+                        <div className="mt-1 space-y-0.5 pl-5">
+                          {status.staged.map((file) => (
+                            <FileChangeItem
+                              key={file.path}
+                              file={file}
+                              onClick={() => fetchDiff(file.path, true)}
+                              isSelected={selectedFile?.path === file.path && selectedFile?.staged === true}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
+                  )}
 
-            {/* Back button (only when done) */}
-            {commitResult && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setCommitResult(null);
-                  setCommitMessages([]);
-                  setCommitStatus('');
-                }}
-                className="w-full"
-              >
-                Back to changes
-              </Button>
-            )}
-          </div>
-        ) : (
-          // File List View
-          <div className="p-3">
-            {!workingDir ? (
-              <div className="text-center text-sm text-gray-500">No working directory</div>
-            ) : error ? (
-              <div className="text-center text-sm text-red-500">{error}</div>
-            ) : isLoading && !status ? (
-              <div className="text-center text-sm text-gray-500">Loading...</div>
-            ) : (
-              <div className="space-y-4">
-                {/* Branch Selector */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowBranchList(!showBranchList)}
-                    className="flex w-full items-center justify-between rounded-md border border-gray-200 bg-gray-100 px-3 py-2 text-sm hover:bg-gray-200 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700"
-                  >
-                    <div className="flex items-center gap-2">
-                      <GitBranch className="h-4 w-4 text-gray-500" />
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        {status?.branch || 'Loading...'}
-                      </span>
+                  {/* Unstaged Changes */}
+                  {status.unstaged.length > 0 && (
+                    <div>
+                      <button
+                        onClick={() => toggleSection('unstaged')}
+                        className="flex w-full items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                      >
+                        <ChevronRight className={`h-4 w-4 transition-transform ${expandedSections.unstaged ? 'rotate-90' : ''}`} />
+                        <span>Changes ({status.unstaged.length})</span>
+                      </button>
+                      {expandedSections.unstaged && (
+                        <div className="mt-1 space-y-0.5 pl-5">
+                          {status.unstaged.map((file) => (
+                            <FileChangeItem
+                              key={file.path}
+                              file={file}
+                              onClick={() => fetchDiff(file.path, false)}
+                              isSelected={selectedFile?.path === file.path && selectedFile?.staged === false}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showBranchList ? 'rotate-180' : ''}`} />
-                  </button>
+                  )}
 
-                  {showBranchList && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowBranchList(false)} />
-                      <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded-md border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800">
-                        {branches.map((branch) => (
-                          <div
-                            key={branch.name}
-                            className={`flex items-center gap-2 px-3 py-2 text-sm ${
-                              branch.isCurrent
-                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
-                            }`}
-                          >
-                            <GitBranch className={`h-3.5 w-3.5 ${branch.isRemote ? 'text-gray-400' : ''}`} />
-                            <span className={branch.isRemote ? 'text-gray-500' : ''}>
-                              {branch.name}
-                            </span>
-                            {branch.isCurrent && (
-                              <span className="ml-auto text-xs text-blue-500">current</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </>
+                  {status.isClean && (
+                    <div className="text-center text-sm text-gray-500">
+                      ✓ Working tree clean
+                    </div>
                   )}
                 </div>
+              )}
 
-                {/* Changes Section */}
-                {status && (
-                  <div className="space-y-3">
-                    {/* Staged Changes */}
-                    {status.staged.length > 0 && (
-                      <div>
-                        <button
-                          onClick={() => toggleSection('staged')}
-                          className="flex w-full items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+              {/* Commit History */}
+              {commits.length > 0 && (
+                <div>
+                  <button
+                    onClick={() => toggleSection('history')}
+                    className="flex w-full items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+                  >
+                    <ChevronRight className={`h-4 w-4 transition-transform ${expandedSections.history ? 'rotate-90' : ''}`} />
+                    <span>History</span>
+                  </button>
+                  {expandedSections.history && (
+                    <div className="mt-1 space-y-1 pl-5">
+                      {commits.map((commit) => (
+                        <div
+                          key={commit.hash}
+                          className="flex items-start gap-2 rounded px-2 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
                         >
-                          <ChevronRight className={`h-4 w-4 transition-transform ${expandedSections.staged ? 'rotate-90' : ''}`} />
-                          <span>Staged ({status.staged.length})</span>
-                        </button>
-                        {expandedSections.staged && (
-                          <div className="mt-1 space-y-0.5 pl-5">
-                            {status.staged.map((file) => (
-                              <FileChangeItem
-                                key={file.path}
-                                file={file}
-                                onClick={() => fetchDiff(file.path, true)}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Unstaged Changes */}
-                    {status.unstaged.length > 0 && (
-                      <div>
-                        <button
-                          onClick={() => toggleSection('unstaged')}
-                          className="flex w-full items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                        >
-                          <ChevronRight className={`h-4 w-4 transition-transform ${expandedSections.unstaged ? 'rotate-90' : ''}`} />
-                          <span>Changes ({status.unstaged.length})</span>
-                        </button>
-                        {expandedSections.unstaged && (
-                          <div className="mt-1 space-y-0.5 pl-5">
-                            {status.unstaged.map((file) => (
-                              <FileChangeItem
-                                key={file.path}
-                                file={file}
-                                onClick={() => fetchDiff(file.path, false)}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {status.isClean && (
-                      <div className="text-center text-sm text-gray-500">
-                        ✓ Working tree clean
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Commit History */}
-                {commits.length > 0 && (
-                  <div>
-                    <button
-                      onClick={() => toggleSection('history')}
-                      className="flex w-full items-center gap-1 text-sm font-medium text-gray-700 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
-                    >
-                      <ChevronRight className={`h-4 w-4 transition-transform ${expandedSections.history ? 'rotate-90' : ''}`} />
-                      <span>History</span>
-                    </button>
-                    {expandedSections.history && (
-                      <div className="mt-1 space-y-1 pl-5">
-                        {commits.map((commit) => (
-                          <div
-                            key={commit.hash}
-                            className="flex items-start gap-2 rounded px-2 py-1.5 text-xs hover:bg-gray-100 dark:hover:bg-gray-800"
-                          >
-                            <code className="flex-shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                              {commit.shortHash}
-                            </code>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-gray-800 dark:text-gray-100">
-                                {commit.message}
-                              </div>
-                              <div className="mt-0.5 flex items-center gap-2 text-gray-500">
-                                <span className="flex items-center gap-1">
-                                  <User className="h-3 w-3" />
-                                  {commit.author}
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  {commit.relativeDate}
-                                </span>
-                              </div>
+                          <code className="flex-shrink-0 rounded bg-gray-100 px-1.5 py-0.5 font-mono text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                            {commit.shortHash}
+                          </code>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-gray-800 dark:text-gray-100">
+                              {commit.message}
+                            </div>
+                            <div className="mt-0.5 flex items-center gap-2 text-gray-500">
+                              <span className="flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                {commit.author}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" />
+                                {commit.relativeDate}
+                              </span>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right Panel - Diff View */}
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {selectedFile ? (
+            <>
+              {/* Diff Header */}
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
+                <span className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate">
+                  {selectedFile.path}
+                </span>
+                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+                  ({selectedFile.staged ? 'staged' : 'unstaged'})
+                </span>
+              </div>
+
+              {/* Diff Content */}
+              <div className="flex-1 overflow-auto">
+                {diffLoading ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-gray-500">
+                    Loading diff...
                   </div>
+                ) : diffError ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-red-500">
+                    {diffError}
+                  </div>
+                ) : !diffContent ? (
+                  <div className="flex items-center justify-center h-32 text-sm text-gray-500">
+                    No changes to display
+                  </div>
+                ) : (
+                  <DiffView
+                    data={{
+                      newFile: { fileName: selectedFile.path },
+                      hunks: [diffContent],
+                    }}
+                    diffViewFontSize={12}
+                    diffViewHighlight
+                    diffViewMode={DiffModeEnum.Unified}
+                  />
                 )}
               </div>
-            )}
-          </div>
-        )}
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+              Select a file to view diff
+            </div>
+          )}
+        </div>
       </div>
     </ModalPanel>
   );
