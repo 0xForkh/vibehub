@@ -1,4 +1,4 @@
-import { Plus, Check, MoreVertical, Trash2, Play, ExternalLink, ArrowRight, ArrowLeft, Paperclip, File, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Check, MoreVertical, Trash2, Play, ExternalLink, ArrowRight, ArrowLeft, Paperclip, File, Loader2, AlertCircle, Eye } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Badge } from '../../ui/badge';
@@ -100,6 +100,7 @@ interface TaskCardProps {
   onEditDescriptionChange: (value: string) => void;
   onStartSession?: () => void;
   onOpenSession?: (sessionId: string) => void;
+  onPreviewSession?: (sessionId: string) => void;
   onMarkDone: () => void;
   onDelete: () => void;
   onMoveToReview?: () => void;
@@ -121,6 +122,7 @@ export function TaskCard({
   onEditDescriptionChange,
   onStartSession,
   onOpenSession,
+  onPreviewSession,
   onMarkDone,
   onDelete,
   onMoveToReview,
@@ -419,6 +421,17 @@ export function TaskCard({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {hasValidSession && onPreviewSession && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0 text-gray-600 hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700"
+              onClick={() => onPreviewSession(task.sessionId!)}
+              title="Preview session"
+            >
+              <Eye className="h-4 w-4" />
+            </Button>
+          )}
           {hasValidSession && onOpenSession ? (
             <Button
               variant="ghost"
