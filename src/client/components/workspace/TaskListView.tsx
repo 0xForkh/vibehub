@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Plus, FolderOpen, GitCommitHorizontal } from 'lucide-react';
 import { Button } from '../ui/button';
 import { TaskCard } from './tasks/TaskCard';
@@ -8,6 +8,7 @@ import { getTaskStatus, type Task, type TaskAttachment, type SessionStatusInfo }
 import { FileBrowser } from '../claude/FileBrowser';
 import { GitPanel } from '../claude/GitPanel';
 import { StartSessionDialog } from './StartSessionDialog';
+import { SessionPreviewDrawer } from './SessionPreviewDrawer';
 import type { SessionManagerResult } from '../../types/sessionState';
 
 interface TaskListViewProps {
@@ -41,6 +42,14 @@ export function TaskListView({
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
   const [startSessionTask, setStartSessionTask] = useState<Task | null>(null);
+  const [previewSessionId, setPreviewSessionId] = useState<string | null>(null);
+
+  // Subscribe to the preview session when it changes
+  useEffect(() => {
+    if (previewSessionId && sessionManager) {
+      sessionManager.subscribeToSession(previewSessionId);
+    }
+  }, [previewSessionId, sessionManager]);
 
   // Build a map of session statuses for tasks with linked sessions
   const sessionStatusMap = useMemo((): Map<string, SessionStatusInfo> => {
@@ -142,6 +151,7 @@ export function TaskListView({
       onEditDescriptionChange={setEditingDescription}
       onStartSession={onCreateSession ? () => handleStartSession(task) : undefined}
       onOpenSession={onOpenSession}
+      onPreviewSession={sessionManager ? setPreviewSessionId : undefined}
       onMarkDone={() => markDone(task)}
       onDelete={() => deleteTask(task.id)}
       onMoveToReview={column === 'left' ? () => updateTask(task.id, { column: 'review' }) : undefined}
@@ -260,6 +270,13 @@ export function TaskListView({
         open={!!startSessionTask}
         onOpenChange={(open) => !open && setStartSessionTask(null)}
         onConfirm={handleStartSessionConfirm}
+      />
+      <SessionPreviewDrawer
+        isOpen={!!previewSessionId}
+        onClose={() => setPreviewSessionId(null)}
+        sessionId={previewSessionId}
+        sessionState={previewSessionId ? sessionManager?.sessionStates.get(previewSessionId) : undefined}
+        onOpenSession={onOpenSession}
       />
     </div>
   );
