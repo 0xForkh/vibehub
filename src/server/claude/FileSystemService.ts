@@ -154,6 +154,48 @@ export class FileSystemService {
   }
 
   /**
+   * Search for files by name pattern (recursive)
+   */
+  async searchFiles(query: string, limit = 20): Promise<{ name: string; path: string }[]> {
+    const results: { name: string; path: string }[] = [];
+    const queryLower = query.toLowerCase();
+
+    const search = async (dirPath: string, relativePath: string): Promise<void> => {
+      if (results.length >= limit) return;
+
+      try {
+        const entries = await readdir(dirPath, { withFileTypes: true });
+
+        for (const entry of entries) {
+          if (results.length >= limit) return;
+
+          // Skip node_modules and hidden directories
+          if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
+            // eslint-disable-next-line no-continue
+            continue;
+          }
+
+          const entryRelativePath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+
+          if (entry.isDirectory()) {
+            await search(join(dirPath, entry.name), entryRelativePath);
+          } else if (entry.name.toLowerCase().includes(queryLower)) {
+            results.push({
+              name: entry.name,
+              path: entryRelativePath,
+            });
+          }
+        }
+      } catch {
+        // Skip directories we can't read
+      }
+    };
+
+    await search(this.basePath, '');
+    return results;
+  }
+
+  /**
    * Get file extension for syntax highlighting
    */
   static getLanguageFromPath(filePath: string): string {

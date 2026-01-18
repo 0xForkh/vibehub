@@ -70,4 +70,37 @@ router.get('/read', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /api/files/search - Search for files by name pattern
+ * Query params:
+ *   - path: base directory path (required)
+ *   - query: search query (required, min 2 chars)
+ *   - limit: max results (optional, defaults to 20)
+ */
+router.get('/search', async (req: Request, res: Response) => {
+  try {
+    const basePath = req.query.path as string;
+    const query = req.query.query as string;
+    const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 50);
+
+    if (!basePath) {
+      res.status(400).json({ error: 'Path is required' });
+      return;
+    }
+
+    if (!query || query.length < 2) {
+      res.status(400).json({ error: 'Query must be at least 2 characters' });
+      return;
+    }
+
+    const fsService = new FileSystemService(basePath);
+    const results = await fsService.searchFiles(query, limit);
+
+    res.json({ files: results });
+  } catch (err) {
+    logger.error('Failed to search files', { err });
+    res.status(500).json({ error: 'Failed to search files' });
+  }
+});
+
 export { router as filesRouter };
