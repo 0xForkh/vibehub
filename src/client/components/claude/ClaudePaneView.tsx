@@ -451,6 +451,7 @@ export function ClaudePaneView({
           showAbort={thinking}
           slashCommands={slashCommands}
           socket={socket}
+          workingDir={workingDir}
           placeholder={(() => {
             if (!isConnected) return 'Connecting...';
             if (pendingRequest) return 'Type to deny with message, or use buttons above...';

@@ -1,8 +1,9 @@
-import { Square, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react';
+import { Square, Paperclip, X, FileText, Image as ImageIcon, File, Loader2 } from 'lucide-react';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { FileAttachment } from '../../types/claude';
 import { DictationButton } from './DictationButton';
+import { useFileMention, parseFileMentions } from '../../hooks/useFileMention';
 
 interface ClaudeInputBarProps {
   onSendMessage: (message: string, attachments?: FileAttachment[]) => void;
@@ -12,6 +13,7 @@ interface ClaudeInputBarProps {
   showAbort?: boolean;
   slashCommands?: string[];
   socket?: Socket | null;
+  workingDir?: string;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -34,6 +36,7 @@ export function ClaudeInputBar({
   showAbort = false,
   slashCommands = [],
   socket = null,
+  workingDir,
 }: ClaudeInputBarProps) {
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
@@ -45,6 +48,13 @@ export function ClaudeInputBar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  const fileMentionMenuRef = useRef<HTMLDivElement>(null);
+
+  // File mention hook
+  const fileMention = useFileMention({
+    workingDir,
+    enabled: !disabled && !!workingDir,
+  });
 
   // Filter slash commands based on current input
   const filteredSlashCommands = slashCommands.filter((cmd) =>
@@ -59,22 +69,31 @@ export function ClaudeInputBar({
     }
   }, [message]);
 
-  // Close slash menu when clicking outside
+  // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node;
       if (
         slashMenuRef.current &&
-        !slashMenuRef.current.contains(e.target as Node) &&
+        !slashMenuRef.current.contains(target) &&
         textareaRef.current &&
-        !textareaRef.current.contains(e.target as Node)
+        !textareaRef.current.contains(target)
       ) {
         setShowSlashMenu(false);
+      }
+      if (
+        fileMentionMenuRef.current &&
+        !fileMentionMenuRef.current.contains(target) &&
+        textareaRef.current &&
+        !textareaRef.current.contains(target)
+      ) {
+        fileMention.closeMenu();
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [fileMention]);
 
   // Reset selected index when filter changes
   useEffect(() => {
@@ -228,6 +247,7 @@ export function ClaudeInputBar({
   // Handle message input change
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
+    const cursorPosition = e.target.selectionStart || 0;
     setMessage(value);
 
     // Check if we should show slash menu
@@ -236,27 +256,52 @@ export function ClaudeInputBar({
     if (slashMatch && slashCommands.length > 0) {
       setSlashFilter(slashMatch[1]);
       setShowSlashMenu(true);
+      fileMention.closeMenu();
     } else {
       setShowSlashMenu(false);
       setSlashFilter('');
+      // Handle file mention
+      fileMention.handleInputChange(value, cursorPosition);
     }
-  }, [slashCommands]);
+  }, [slashCommands, fileMention]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if ((message.trim() || attachments.length > 0) && !disabled) {
-      onSendMessage(message.trim(), attachments.length > 0 ? attachments : undefined);
+      // Parse file mentions to convert @[name](path) to full path
+      const processedMessage = parseFileMentions(message.trim());
+      onSendMessage(processedMessage, attachments.length > 0 ? attachments : undefined);
       setMessage('');
       setAttachments([]);
+      fileMention.resetState();
     }
   };
 
+  // Handle file mention selection
+  const selectFileMention = useCallback((file: { name: string; path: string }) => {
+    const { newValue, newCursorPosition } = fileMention.selectSuggestion(file);
+    setMessage(newValue);
+    // Set cursor position after React updates
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = newCursorPosition;
+        textareaRef.current.selectionEnd = newCursorPosition;
+        textareaRef.current.focus();
+      }
+    }, 0);
+  }, [fileMention]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Handle ESC to abort or close slash menu
+    // Handle ESC to abort or close menus
     if (e.key === 'Escape') {
       if (showSlashMenu) {
         e.preventDefault();
         setShowSlashMenu(false);
+        return;
+      }
+      if (fileMention.showMenu) {
+        e.preventDefault();
+        fileMention.closeMenu();
         return;
       }
       if (showAbort && onAbort) {
@@ -283,6 +328,25 @@ export function ClaudeInputBar({
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
         selectSlashCommand(filteredSlashCommands[selectedSlashIndex]);
+        return;
+      }
+    }
+
+    // Handle file mention menu navigation
+    if (fileMention.showMenu && fileMention.suggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        fileMention.navigateDown();
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        fileMention.navigateUp();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        selectFileMention(fileMention.suggestions[fileMention.selectedIndex]);
         return;
       }
     }
@@ -442,6 +506,51 @@ export function ClaudeInputBar({
                     }`}
                   >
                     <span className="font-mono text-blue-600 dark:text-blue-400">/{cmd}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* File mention dropdown menu */}
+            {fileMention.showMenu && (
+              <div
+                ref={fileMentionMenuRef}
+                className="absolute bottom-full left-0 mb-2 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+              >
+                {fileMention.loading && (
+                  <div className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Searching...</span>
+                  </div>
+                )}
+                {!fileMention.loading && fileMention.suggestions.length === 0 && fileMention.searchQuery.length >= 2 && (
+                  <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                    No files found matching "{fileMention.searchQuery}"
+                  </div>
+                )}
+                {!fileMention.loading && fileMention.searchQuery.length < 2 && (
+                  <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                    Type at least 2 characters to search...
+                  </div>
+                )}
+                {fileMention.suggestions.map((file, idx) => (
+                  <button
+                    key={file.path}
+                    type="button"
+                    onClick={() => selectFileMention(file)}
+                    className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
+                      idx === fileMention.selectedIndex
+                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100'
+                        : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
+                    }`}
+                  >
+                    <File className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium">{file.name}</span>
+                      <span className="ml-2 truncate text-xs text-gray-500 dark:text-gray-400">
+                        {file.path}
+                      </span>
+                    </div>
                   </button>
                 ))}
               </div>
