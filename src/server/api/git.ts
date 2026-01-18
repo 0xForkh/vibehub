@@ -2,6 +2,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { Router, type Router as ExpressRouter, Request, Response } from 'express';
 import { logger as getLogger } from '../../shared/logger.js';
+import { ClaudeAgentService } from '../claude/ClaudeAgentService.js';
 import { isGitRepo } from '../utils/gitWorktree.js';
 
 const execAsync = promisify(exec);
@@ -254,6 +255,128 @@ router.get('/log', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Failed to get git log', { err });
     res.status(500).json({ error: 'Failed to get git log' });
+  }
+});
+
+/**
+ * GET /api/git/diff - Get diff for a file
+ * Query params:
+ *   - path: directory path (required)
+ *   - file: file path relative to repo (required)
+ *   - staged: whether to show staged diff (default: false)
+ */
+router.get('/diff', async (req: Request, res: Response) => {
+  try {
+    const dirPath = req.query.path as string;
+    const filePath = req.query.file as string;
+    const staged = req.query.staged === 'true';
+
+    if (!dirPath) {
+      res.status(400).json({ error: 'Path is required' });
+      return;
+    }
+
+    if (!filePath) {
+      res.status(400).json({ error: 'File path is required' });
+      return;
+    }
+
+    if (!await isGitRepo(dirPath)) {
+      res.status(400).json({ error: 'Not a git repository' });
+      return;
+    }
+
+    // Get diff - staged uses --cached flag
+    const diffCmd = staged
+      ? `git diff --cached -- "${filePath}"`
+      : `git diff -- "${filePath}"`;
+
+    const { stdout } = await execAsync(diffCmd, { cwd: dirPath, maxBuffer: 10 * 1024 * 1024 });
+
+    res.json({ diff: stdout, file: filePath, staged });
+  } catch (err) {
+    logger.error('Failed to get git diff', { err });
+    res.status(500).json({ error: 'Failed to get git diff' });
+  }
+});
+
+/**
+ * POST /api/git/commit - Ask Claude to review and commit changes
+ * Body:
+ *   - path: directory path (required)
+ */
+router.post('/commit', async (req: Request, res: Response) => {
+  try {
+    const { path: dirPath } = req.body;
+
+    if (!dirPath) {
+      res.status(400).json({ error: 'Path is required' });
+      return;
+    }
+
+    if (!await isGitRepo(dirPath)) {
+      res.status(400).json({ error: 'Not a git repository' });
+      return;
+    }
+
+    // Check if there are changes to commit
+    const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: dirPath });
+    if (!statusOutput.trim()) {
+      res.status(400).json({ error: 'No changes to commit' });
+      return;
+    }
+
+    logger.info('Starting Claude commit', { dirPath });
+
+    const messages: string[] = [];
+    let error: string | null = null;
+
+    const agent = new ClaudeAgentService({
+      workingDir: dirPath,
+      // Use acceptEdits mode - bypassPermissions requires an existing session
+      permissionMode: 'acceptEdits',
+      onMessage: (message) => {
+        // Collect assistant text messages for the response
+        if (message.type === 'assistant' && typeof message.message?.content === 'string') {
+          messages.push(message.message.content);
+        } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+          for (const block of message.message.content) {
+            if (block.type === 'text' && block.text) {
+              messages.push(block.text);
+            }
+          }
+        }
+      },
+      onPermissionRequest: async (_toolName, input) => 
+        // Auto-approve all permission requests for commit operations
+         ({ behavior: 'allow' as const, updatedInput: input })
+      ,
+      onError: (err) => {
+        error = err.message;
+        logger.error('Claude commit error', { error: err.message });
+      },
+      onComplete: () => {
+        logger.info('Claude commit completed');
+      },
+    });
+
+    const prompt = `Review all changed files (staged and unstaged) and commit them.
+Split into multiple commits by feature/purpose if appropriate.
+Use clear, descriptive commit messages.
+Do NOT push to remote.
+After committing, briefly summarize what was committed.`;
+
+    await agent.start(prompt);
+
+    if (error) {
+      res.status(500).json({ error, messages });
+      return;
+    }
+
+    res.json({ success: true, messages });
+  } catch (err) {
+    logger.error('Failed to run Claude commit', { err });
+    res.status(500).json({ error: 'Failed to run Claude commit' });
   }
 });
 
