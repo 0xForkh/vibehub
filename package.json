@@ -78,6 +78,7 @@
     "react-resizable-panels": "^3.0.6",
     "react-router-dom": "^7.9.3",
     "rehype-highlight": "^7.0.2",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "response-time": "^2.3.2",
     "sass": "^1.54.4",

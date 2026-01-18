@@ -2,6 +2,7 @@ import { FileText, Image as ImageIcon } from 'lucide-react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { CodeBlock } from './CodeBlock';
 import { ToolUseRenderer } from './tooluse/ToolUseRenderer';
@@ -120,7 +121,7 @@ export function ClaudeConversationView({
           {textWithoutFiles && (
             <div className="prose prose-sm dark:prose-invert max-w-none">
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={[remarkGfm, remarkBreaks]}
                 rehypePlugins={[rehypeHighlight]}
                 components={{
                   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
@@ -170,7 +171,7 @@ export function ClaudeConversationView({
             return (
               <div key={idx} className="prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
+                  remarkPlugins={[remarkGfm, remarkBreaks]}
                   rehypePlugins={[rehypeHighlight]}
                   components={{
                     pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
