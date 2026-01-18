@@ -32,3 +32,8 @@ compilation errors. No need to run `npx tsc` separately.
 ## Stack
 
 TypeScript, React, Express, Socket.io, Claude Agent SDK, SQLite, xterm.js
+
+## UI Guidelines
+
+- **Dark mode support**: Always use both light and dark variants for colors
+  (e.g., `text-gray-700 dark:text-gray-300`, `bg-gray-50 dark:bg-gray-800`)

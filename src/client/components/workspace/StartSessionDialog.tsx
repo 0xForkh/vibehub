@@ -70,20 +70,20 @@ export function StartSessionDialog({
 
         <div className="mt-4 space-y-4">
           {/* Worktree option */}
-          <div className="rounded-md border border-gray-700 bg-gray-800/50 p-3">
+          <div className="rounded-md border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800/50">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={useWorktree}
                 onChange={(e) => setUseWorktree(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-600 bg-gray-800"
+                className="h-4 w-4 rounded border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800"
               />
-              <span className="flex items-center gap-1.5 text-sm text-gray-300">
+              <span className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
                 <GitBranch className="h-3.5 w-3.5" />
                 Use git worktree
               </span>
             </label>
-            <p className="mt-1.5 ml-6 text-xs text-gray-500">
+            <p className="mt-1.5 ml-6 text-xs text-gray-500 dark:text-gray-500">
               Creates an isolated copy of the repo on a new branch
             </p>
 
