@@ -29,6 +29,7 @@ interface SessionSidebarProps {
   onToggle: () => void;
   onWidthChange: (width: number) => void;
   onSelectSession: (sessionId: string) => void;
+  onSelectProject: (projectPath: string, projectName: string) => void;
   onCreateSession: (name: string, workingDir: string, worktree?: WorktreeOptions) => void;
   onRenameSession: (sessionId: string, name: string) => void;
   onDeleteSession: (sessionId: string, cleanupWorktree?: boolean) => void;
@@ -64,6 +65,7 @@ export function SessionSidebar({
   onToggle,
   onWidthChange,
   onSelectSession,
+  onSelectProject,
   onCreateSession,
   onRenameSession,
   onDeleteSession,
@@ -503,21 +505,30 @@ export function SessionSidebar({
                   <div key={group.path}>
                     {/* Folder header */}
                     <div
-                      className="group/folder flex items-center gap-1 px-2 py-1.5 cursor-pointer text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                      onClick={() => toggleFolder(group.path)}
+                      className="group/folder flex items-center gap-1 px-2 py-1.5 text-gray-600 dark:text-gray-400"
                       title={group.path}
                     >
-                      {isCollapsed ? (
-                        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
-                      ) : (
-                        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />
-                      )}
-                      <Folder className="h-4 w-4 flex-shrink-0 text-yellow-600" />
-                      <span className="flex-1 truncate text-sm font-medium">{group.displayName}</span>
+                      <button
+                        className="flex-shrink-0 p-0.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                        onClick={() => toggleFolder(group.path)}
+                      >
+                        {isCollapsed ? (
+                          <ChevronRight className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        className="flex flex-1 items-center gap-1 truncate hover:text-gray-900 dark:hover:text-gray-200"
+                        onClick={() => onSelectProject(group.path, group.displayName)}
+                      >
+                        <Folder className="h-4 w-4 flex-shrink-0 text-yellow-600" />
+                        <span className="truncate text-sm font-medium">{group.displayName}</span>
+                      </button>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="h-5 w-5 p-0"
+                        className="h-5 w-5 p-0 opacity-0 group-hover/folder:opacity-100"
                         onClick={(e) => {
                           e.stopPropagation();
                           handleCreateInFolder(group.path);

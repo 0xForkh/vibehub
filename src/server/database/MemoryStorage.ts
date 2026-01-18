@@ -1,5 +1,5 @@
 import type { StorageBackend } from './StorageBackend.js';
-import type { GlobalClaudeSettings } from '../sessions/types.js';
+import type { GlobalClaudeSettings, Task } from '../sessions/types.js';
 
 const GLOBAL_CLAUDE_SETTINGS_KEY = 'claude:global:settings';
 
@@ -106,5 +106,47 @@ export class MemoryStorage implements StorageBackend {
 
   async setGlobalClaudeSettings(settings: GlobalClaudeSettings): Promise<void> {
     this.strings.set(GLOBAL_CLAUDE_SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  // Task management
+  async getTasks(projectPath: string): Promise<Task[]> {
+    const taskIds = await this.smembers(`tasks:${projectPath}`);
+    const tasks: Task[] = [];
+    for (const id of taskIds) {
+      const task = await this.getTask(id);
+      if (task) tasks.push(task);
+    }
+    return tasks;
+  }
+
+  async getTask(taskId: string): Promise<Task | null> {
+    const data = this.strings.get(`task:${taskId}`);
+    if (!data) return null;
+    try {
+      return JSON.parse(data) as Task;
+    } catch {
+      return null;
+    }
+  }
+
+  async createTask(task: Task): Promise<void> {
+    this.strings.set(`task:${task.id}`, JSON.stringify(task));
+    await this.sadd(`tasks:${task.projectPath}`, task.id);
+  }
+
+  async updateTask(taskId: string, updates: Partial<Omit<Task, 'id' | 'projectPath' | 'createdAt'>>): Promise<Task | null> {
+    const task = await this.getTask(taskId);
+    if (!task) return null;
+    const updated = { ...task, ...updates, updatedAt: new Date().toISOString() };
+    this.strings.set(`task:${taskId}`, JSON.stringify(updated));
+    return updated;
+  }
+
+  async deleteTask(taskId: string): Promise<void> {
+    const task = await this.getTask(taskId);
+    if (task) {
+      this.strings.delete(`task:${taskId}`);
+      await this.srem(`tasks:${task.projectPath}`, taskId);
+    }
   }
 }

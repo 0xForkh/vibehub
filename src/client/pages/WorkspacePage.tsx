@@ -5,13 +5,15 @@ import { useSessions } from '../hooks/useSessions';
 import { useSessionManager } from '../hooks/useSessionManager';
 import { useVisualViewport } from '../hooks/useVisualViewport';
 import { SessionSidebar } from '../components/workspace/SessionSidebar';
-import { SessionTabs } from '../components/workspace/SessionTabs';
+import { SessionTabs, createKanbanTabId, isKanbanTabId, type KanbanTab } from '../components/workspace/SessionTabs';
 import { SessionPanel } from '../components/workspace/SessionPanel';
 import { Sheet, SheetContent } from '../components/ui/sheet';
 import { Button } from '../components/ui/button';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { api } from '../lib/api';
 
 const STORAGE_KEY = 'workspace-state';
+const KANBAN_TABS_KEY = 'workspace-kanban-tabs';
 
 interface WorkspaceState {
   openTabIds: string[];
@@ -47,6 +49,27 @@ function saveState(state: WorkspaceState) {
   }
 }
 
+function loadKanbanTabs(): Map<string, KanbanTab> {
+  try {
+    const saved = localStorage.getItem(KANBAN_TABS_KEY);
+    if (saved) {
+      const entries = JSON.parse(saved) as [string, KanbanTab][];
+      return new Map(entries);
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return new Map();
+}
+
+function saveKanbanTabs(tabs: Map<string, KanbanTab>) {
+  try {
+    localStorage.setItem(KANBAN_TABS_KEY, JSON.stringify(Array.from(tabs.entries())));
+  } catch {
+    // Ignore storage errors
+  }
+}
+
 export function WorkspacePage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { sessions, loading, createClaudeSession, renameSession, deleteSession, refresh: refreshSessions } = useSessions();
@@ -56,6 +79,12 @@ export function WorkspacePage() {
 
   // Track a pending session ID that we're waiting to appear in the sessions list
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
+
+  // Track pending initial prompts for sessions created from kanban tasks
+  const [pendingInitialPrompts, setPendingInitialPrompts] = useState<Map<string, string>>(new Map());
+
+  // Kanban tabs state
+  const [kanbanTabs, setKanbanTabs] = useState<Map<string, KanbanTab>>(() => loadKanbanTabs());
 
   // Use refs to store functions for use in session manager callback
   const setStateRef = useRef<React.Dispatch<React.SetStateAction<WorkspaceState>> | null>(null);
@@ -110,6 +139,11 @@ export function WorkspacePage() {
     saveState(state);
   }, [state]);
 
+  // Persist kanban tabs
+  useEffect(() => {
+    saveKanbanTabs(kanbanTabs);
+  }, [kanbanTabs]);
+
   // When a pending session appears in the sessions list, open and activate it
   useEffect(() => {
     if (!pendingSessionId) return;
@@ -130,6 +164,27 @@ export function WorkspacePage() {
     }
   }, [sessions, pendingSessionId]);
 
+  // Send pending initial prompts when session becomes connected
+  useEffect(() => {
+    if (pendingInitialPrompts.size === 0) return;
+
+    pendingInitialPrompts.forEach((prompt, sessionId) => {
+      const sessionState = sessionManager.sessionStates.get(sessionId);
+      // Only send when session is connected
+      if (sessionState?.isConnected) {
+        const actions = sessionManager.getSessionActions(sessionId);
+        if (actions) {
+          actions.sendMessage(prompt);
+          setPendingInitialPrompts(prev => {
+            const next = new Map(prev);
+            next.delete(sessionId);
+            return next;
+          });
+        }
+      }
+    });
+  }, [pendingInitialPrompts, sessionManager.sessionStates, sessionManager.getSessionActions]);
+
   // Sync URL with state
   useEffect(() => {
     const params: Record<string, string> = {};
@@ -149,16 +204,21 @@ export function WorkspacePage() {
   }, [state.activeTabId, state.openTabIds, searchParams, setSearchParams]);
 
   // Clean up tabs for deleted sessions (only after sessions have loaded)
+  // Keep kanban tabs as they don't depend on sessions
   useEffect(() => {
     if (loading) return; // Don't clean up while sessions are still loading
 
     const validIds = sessions.map(s => s.id);
-    const invalidTabs = state.openTabIds.filter(id => !validIds.includes(id));
+    const invalidTabs = state.openTabIds.filter(id =>
+      !isKanbanTabId(id) && !validIds.includes(id)
+    );
 
     if (invalidTabs.length > 0) {
       setState(prev => {
-        const newOpenTabs = prev.openTabIds.filter(id => validIds.includes(id));
-        const newActiveTab = prev.activeTabId && validIds.includes(prev.activeTabId)
+        const newOpenTabs = prev.openTabIds.filter(id =>
+          isKanbanTabId(id) || validIds.includes(id)
+        );
+        const newActiveTab = prev.activeTabId && (isKanbanTabId(prev.activeTabId) || validIds.includes(prev.activeTabId))
           ? prev.activeTabId
           : newOpenTabs[0] || null;
 
@@ -171,10 +231,12 @@ export function WorkspacePage() {
     }
   }, [sessions, loading, state.openTabIds]);
 
-  // Subscribe to open sessions in the session manager
+  // Subscribe to open sessions in the session manager (skip kanban tabs)
   useEffect(() => {
-    state.openTabIds.forEach(sessionId => {
-      sessionManager.subscribeToSession(sessionId);
+    state.openTabIds.forEach(tabId => {
+      if (!isKanbanTabId(tabId)) {
+        sessionManager.subscribeToSession(tabId);
+      }
     });
   }, [state.openTabIds, sessionManager.subscribeToSession]);
 
@@ -196,22 +258,53 @@ export function WorkspacePage() {
     setMobileDrawerOpen(false);
   }, [sessionManager]);
 
-  const handleSelectTab = useCallback((sessionId: string) => {
+  const handleSelectProject = useCallback((projectPath: string, projectName: string) => {
+    const tabId = createKanbanTabId(projectPath);
+
+    // Add to kanban tabs if not already there
+    setKanbanTabs(prev => {
+      if (!prev.has(tabId)) {
+        const next = new Map(prev);
+        next.set(tabId, { projectPath, projectName });
+        return next;
+      }
+      return prev;
+    });
+
+    setState(prev => {
+      const newOpenTabs = prev.openTabIds.includes(tabId)
+        ? prev.openTabIds
+        : [...prev.openTabIds, tabId];
+
+      return {
+        ...prev,
+        openTabIds: newOpenTabs,
+        activeTabId: tabId,
+      };
+    });
+
+    // Close drawer on mobile after selecting
+    setMobileDrawerOpen(false);
+  }, []);
+
+  const handleSelectTab = useCallback((tabId: string) => {
     setState(prev => ({
       ...prev,
-      activeTabId: sessionId,
+      activeTabId: tabId,
     }));
-    // Clear done state when viewing the session
-    sessionManager.getSessionActions(sessionId)?.clearDone();
+    // Clear done state when viewing a session tab
+    if (!isKanbanTabId(tabId)) {
+      sessionManager.getSessionActions(tabId)?.clearDone();
+    }
   }, [sessionManager]);
 
-  const handleCloseTab = useCallback((sessionId: string) => {
+  const handleCloseTab = useCallback((tabId: string) => {
     setState(prev => {
-      const newOpenTabs = prev.openTabIds.filter(id => id !== sessionId);
+      const newOpenTabs = prev.openTabIds.filter(id => id !== tabId);
       let newActiveTab = prev.activeTabId;
 
-      if (prev.activeTabId === sessionId) {
-        const closedIndex = prev.openTabIds.indexOf(sessionId);
+      if (prev.activeTabId === tabId) {
+        const closedIndex = prev.openTabIds.indexOf(tabId);
         newActiveTab = newOpenTabs[closedIndex] || newOpenTabs[closedIndex - 1] || null;
       }
 
@@ -221,6 +314,15 @@ export function WorkspacePage() {
         activeTabId: newActiveTab,
       };
     });
+
+    // Clean up kanban tab data if it was a kanban tab
+    if (isKanbanTabId(tabId)) {
+      setKanbanTabs(prev => {
+        const next = new Map(prev);
+        next.delete(tabId);
+        return next;
+      });
+    }
   }, []);
 
   const handleToggleSidebar = useCallback(() => {
@@ -270,6 +372,16 @@ export function WorkspacePage() {
     }
   }, [deleteSession, handleCloseTab]);
 
+  // Simple session delete for task completion (no worktree cleanup)
+  const handleDeleteSessionSimple = useCallback(async (sessionId: string) => {
+    try {
+      handleCloseTab(sessionId);
+      await deleteSession(sessionId, false);
+    } catch (err) {
+      console.error('Failed to delete session:', err);
+    }
+  }, [deleteSession, handleCloseTab]);
+
   const handleFork = useCallback((newSessionId: string) => {
     handleSelectSession(newSessionId);
   }, [handleSelectSession]);
@@ -281,6 +393,47 @@ export function WorkspacePage() {
     }
   }, [sessionManager]);
 
+  const handleCreateSessionFromTask = useCallback(async (
+    name: string,
+    workingDir: string,
+    initialPrompt?: string,
+    taskId?: string
+  ) => {
+    try {
+      const session = await createClaudeSession(name, workingDir);
+      if (session) {
+        handleSelectSession(session.id);
+        // Store the initial prompt to be sent when the session is ready
+        const formattedPrompt = initialPrompt
+          ? `# Task: ${name}
+
+${initialPrompt}
+
+---
+When you have completed this task, use the \`mcp__kanban-tools__update_task_status\` tool to move the task to the "review" column.`
+          : `# Task: ${name}
+
+---
+When you have completed this task, use the \`mcp__kanban-tools__update_task_status\` tool to move the task to the "review" column.`;
+        setPendingInitialPrompts(prev => {
+          const next = new Map(prev);
+          next.set(session.id, formattedPrompt);
+          return next;
+        });
+        // Link the task to the newly created session
+        if (taskId) {
+          try {
+            await api.patch(`/api/tasks/${taskId}`, { sessionId: session.id });
+          } catch (err) {
+            console.error('Failed to link task to session:', err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to create session from task:', err);
+    }
+  }, [createClaudeSession, handleSelectSession]);
+
   const sidebarContent = (
     <SessionSidebar
       sessions={sessions}
@@ -291,6 +444,7 @@ export function WorkspacePage() {
       onToggle={isMobile ? () => setMobileDrawerOpen(false) : handleToggleSidebar}
       onWidthChange={handleSidebarWidthChange}
       onSelectSession={handleSelectSession}
+      onSelectProject={handleSelectProject}
       onCreateSession={handleCreateSession}
       onRenameSession={handleRenameSession}
       onDeleteSession={handleDeleteSession}
@@ -343,6 +497,7 @@ export function WorkspacePage() {
               sessions={sessions}
               openTabIds={state.openTabIds}
               activeTabId={state.activeTabId}
+              kanbanTabs={kanbanTabs}
               onSelectTab={handleSelectTab}
               onCloseTab={handleCloseTab}
               notifications={sessionManager.getNotifications()}
@@ -355,10 +510,14 @@ export function WorkspacePage() {
           <SessionPanel
             sessions={sessions}
             openTabIds={state.openTabIds}
-            activeSessionId={state.activeTabId}
+            activeTabId={state.activeTabId}
+            kanbanTabs={kanbanTabs}
             onCloseTab={handleCloseTab}
             onDelete={handleDeleteSession}
             onFork={handleFork}
+            onCreateSessionFromTask={handleCreateSessionFromTask}
+            onOpenSession={handleSelectSession}
+            onDeleteSession={handleDeleteSessionSimple}
             sessionManager={sessionManager}
           />
         </div>

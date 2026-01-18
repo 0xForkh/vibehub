@@ -1,6 +1,8 @@
 import { logger as getLogger } from '../../shared/logger.js';
+import { getStorageBackend } from '../database/redis.js';
 import { SessionStore } from '../sessions/SessionStore.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
+import { createKanbanToolsServer } from './tools/kanbanTools.js';
 import { createSessionToolsServer } from './tools/sessionTools.js';
 import type { PermissionResult, SDKMessage, SDKAssistantMessage, SDKUserMessage, SDKResultMessage, SDKSystemMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { Server as SocketIOServer } from 'socket.io';
@@ -221,6 +223,13 @@ export class ClaudeSessionManager {
       currentSessionId: sessionId,
     });
 
+    // Create kanban tools MCP server for this session
+    const storage = await getStorageBackend();
+    const kanbanToolsServer = createKanbanToolsServer({
+      storage,
+      currentSessionId: sessionId,
+    });
+
     const service = new ClaudeAgentService({
       workingDir,
       sessionId: resumeSessionId,
@@ -228,6 +237,7 @@ export class ClaudeSessionManager {
       permissionMode,
       mcpServers: {
         'session-tools': sessionToolsServer,
+        'kanban-tools': kanbanToolsServer,
       },
       onMessage: (message) => this.handleMessage(sessionId, message),
       onPermissionRequest: async (toolName, input, toolUseId) => this.handlePermissionRequest(sessionId, toolName, input, toolUseId),

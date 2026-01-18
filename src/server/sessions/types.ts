@@ -56,3 +56,25 @@ export interface GlobalClaudeSettings {
   allowedTools?: string[]; // Global tool allowlist (e.g., "Bash(pnpm build)", "Bash(git *)")
   // Future extensibility: add more global settings here
 }
+
+/**
+ * Kanban task for project-level task management
+ */
+export interface TaskAttachment {
+  name: string;
+  type: string; // MIME type
+  size: number;
+  data: string; // base64 encoded
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  description?: string;
+  column: 'backlog' | 'todo' | 'review';
+  projectPath: string; // Normalized working directory
+  sessionId?: string; // Reference to created session
+  attachments?: TaskAttachment[];
+  createdAt: string;
+  updatedAt: string;
+}

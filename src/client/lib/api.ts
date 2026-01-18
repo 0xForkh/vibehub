@@ -54,6 +54,10 @@ class ApiClient {
     return this.request(url, { ...options, method: 'PUT', body });
   }
 
+  patch(url: string, body?: unknown, options?: RequestOptions) {
+    return this.request(url, { ...options, method: 'PATCH', body });
+  }
+
   delete(url: string, options?: RequestOptions) {
     return this.request(url, { ...options, method: 'DELETE' });
   }

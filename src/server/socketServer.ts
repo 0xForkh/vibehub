@@ -8,6 +8,7 @@ import { Server } from 'socket.io';
 import { logger } from '../shared/logger.js';
 import { gitRouter } from './api/git.js';
 import { sessionsRouter } from './api/sessions.js';
+import { tasksRouter } from './api/tasks.js';
 import { SessionStore } from './sessions/SessionStore.js';
 import { serveStatic } from './socketServer/assets.js';
 import { registerClaudeHandlers } from './socketServer/claudeHandlers.js';
@@ -50,6 +51,7 @@ export async function server(
     .use(policies())
     .use('/api/sessions', sessionsRouter)
     .use('/api/git', gitRouter)
+    .use('/api/tasks', tasksRouter)
     .get('/api/uploads/:sessionId/:filename', async (req, res) => {
       try {
         const { sessionId, filename } = req.params;

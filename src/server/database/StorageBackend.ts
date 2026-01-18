@@ -1,4 +1,4 @@
-import type { GlobalClaudeSettings } from '../sessions/types.js';
+import type { GlobalClaudeSettings, Task } from '../sessions/types.js';
 
 /**
  * Storage backend interface for session data
@@ -27,4 +27,11 @@ export interface StorageBackend {
   // Global Claude settings
   getGlobalClaudeSettings(): Promise<GlobalClaudeSettings | null>;
   setGlobalClaudeSettings(settings: GlobalClaudeSettings): Promise<void>;
+
+  // Task management
+  getTasks(projectPath: string): Promise<Task[]>;
+  getTask(taskId: string): Promise<Task | null>;
+  createTask(task: Task): Promise<void>;
+  updateTask(taskId: string, updates: Partial<Omit<Task, 'id' | 'projectPath' | 'createdAt'>>): Promise<Task | null>;
+  deleteTask(taskId: string): Promise<void>;
 }
