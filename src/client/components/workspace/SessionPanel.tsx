@@ -14,7 +14,7 @@ interface SessionPanelProps {
   onCloseTab: (tabId: string) => void;
   onDelete?: (sessionId: string, cleanupWorktree: boolean) => void;
   onFork?: (newSessionId: string) => void;
-  onCreateSessionFromTask?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string) => void;
+  onCreateSessionFromTask?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: { name: string; type: string; size: number; data: string }[]) => void;
   onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
   sessionManager: SessionManagerResult;

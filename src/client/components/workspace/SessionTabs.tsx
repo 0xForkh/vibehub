@@ -108,7 +108,14 @@ export function SessionTabs({
         className="flex flex-1 overflow-x-auto scrollbar-hide"
         style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
-        {openTabIds.map((tabId) => {
+        {/* Sort tabs: kanban tabs first, then session tabs */}
+        {[...openTabIds].sort((a, b) => {
+          const aIsKanban = isKanbanTabId(a);
+          const bIsKanban = isKanbanTabId(b);
+          if (aIsKanban && !bIsKanban) return -1;
+          if (!aIsKanban && bIsKanban) return 1;
+          return 0;
+        }).map((tabId) => {
           const isKanban = isKanbanTabId(tabId);
           const isActive = tabId === activeTabId;
 

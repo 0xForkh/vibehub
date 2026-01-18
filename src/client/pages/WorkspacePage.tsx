@@ -81,7 +81,7 @@ export function WorkspacePage() {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
 
   // Track pending initial prompts for sessions created from kanban tasks
-  const [pendingInitialPrompts, setPendingInitialPrompts] = useState<Map<string, string>>(new Map());
+  const [pendingInitialPrompts, setPendingInitialPrompts] = useState<Map<string, { prompt: string; attachments?: { name: string; type: string; size: number; data: string }[] }>>(new Map());
 
   // Kanban tabs state
   const [kanbanTabs, setKanbanTabs] = useState<Map<string, KanbanTab>>(() => loadKanbanTabs());
@@ -168,13 +168,13 @@ export function WorkspacePage() {
   useEffect(() => {
     if (pendingInitialPrompts.size === 0) return;
 
-    pendingInitialPrompts.forEach((prompt, sessionId) => {
+    pendingInitialPrompts.forEach(({ prompt, attachments }, sessionId) => {
       const sessionState = sessionManager.sessionStates.get(sessionId);
       // Only send when session is connected
       if (sessionState?.isConnected) {
         const actions = sessionManager.getSessionActions(sessionId);
         if (actions) {
-          actions.sendMessage(prompt);
+          actions.sendMessage(prompt, attachments);
           setPendingInitialPrompts(prev => {
             const next = new Map(prev);
             next.delete(sessionId);
@@ -397,7 +397,8 @@ export function WorkspacePage() {
     name: string,
     workingDir: string,
     initialPrompt?: string,
-    taskId?: string
+    taskId?: string,
+    attachments?: { name: string; type: string; size: number; data: string }[]
   ) => {
     try {
       const session = await createClaudeSession(name, workingDir);
@@ -417,7 +418,7 @@ When you have completed this task, use the \`mcp__kanban-tools__update_task_stat
 When you have completed this task, use the \`mcp__kanban-tools__update_task_status\` tool to move the task to the "review" column.`;
         setPendingInitialPrompts(prev => {
           const next = new Map(prev);
-          next.set(session.id, formattedPrompt);
+          next.set(session.id, { prompt: formattedPrompt, attachments });
           return next;
         });
         // Link the task to the newly created session
