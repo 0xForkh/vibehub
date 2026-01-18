@@ -10,7 +10,7 @@ interface ModalPanelProps {
   statusIndicator?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
-  width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
+  width?: 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl';
 }
 
 const widthClasses = {
@@ -20,6 +20,9 @@ const widthClasses = {
   '2xl': 'max-w-2xl',
   '3xl': 'max-w-3xl',
   '4xl': 'max-w-4xl',
+  '5xl': 'max-w-5xl',
+  '6xl': 'max-w-6xl',
+  '7xl': 'max-w-7xl',
 };
 
 export function ModalPanel({
@@ -56,20 +59,20 @@ export function ModalPanel({
 
       {/* Modal */}
       <div
-        className={`relative flex max-h-[80vh] w-full flex-col rounded-lg border border-gray-700 bg-gray-900 shadow-2xl ${widthClasses[width]}`}
+        className={`relative flex max-h-[80vh] w-full flex-col rounded-lg border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 ${widthClasses[width]}`}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-700 px-4 py-3 flex-shrink-0">
+        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 flex-shrink-0 dark:border-gray-700">
           <div className="flex items-center gap-2">
             {icon}
-            <span className="font-medium text-gray-200">{title}</span>
+            <span className="font-medium text-gray-800 dark:text-gray-200">{title}</span>
             {statusIndicator}
           </div>
           <Button
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="h-7 w-7 p-0 text-gray-400 hover:text-gray-200"
+            className="h-7 w-7 p-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
             title="Close (Esc)"
           >
             <X className="h-4 w-4" />
@@ -78,7 +81,7 @@ export function ModalPanel({
 
         {/* Toolbar */}
         {toolbar && (
-          <div className="flex items-center gap-1 border-b border-gray-700 px-3 py-1.5 bg-gray-800 flex-shrink-0">
+          <div className="flex items-center gap-1 border-b border-gray-200 px-3 py-1.5 bg-gray-50 flex-shrink-0 dark:border-gray-700 dark:bg-gray-800">
             {toolbar}
           </div>
         )}
