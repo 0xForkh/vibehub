@@ -98,7 +98,7 @@ interface TaskCardProps {
   onEditSubmit: (attachments?: TaskAttachment[]) => void;
   onEditTitleChange: (value: string) => void;
   onEditDescriptionChange: (value: string) => void;
-  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[]) => void;
+  onStartSession?: () => void;
   onOpenSession?: (sessionId: string) => void;
   onMarkDone: () => void;
   onDelete: () => void;
@@ -119,7 +119,7 @@ export function TaskCard({
   onEditSubmit,
   onEditTitleChange,
   onEditDescriptionChange,
-  onCreateSession,
+  onStartSession,
   onOpenSession,
   onMarkDone,
   onDelete,
@@ -429,12 +429,12 @@ export function TaskCard({
             >
               <ExternalLink className="h-4 w-4" />
             </Button>
-          ) : onCreateSession && (
+          ) : onStartSession && (
             <Button
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/30"
-              onClick={() => onCreateSession(task.title, projectPath, task.description, task.id, task.attachments)}
+              onClick={onStartSession}
               title="Start session"
             >
               <Play className="h-4 w-4" />

@@ -7,6 +7,7 @@ import { useTaskList } from './tasks/useTaskList';
 import { getTaskStatus, type Task, type TaskAttachment, type SessionStatusInfo } from './tasks/types';
 import { FileBrowser } from '../claude/FileBrowser';
 import { GitPanel } from '../claude/GitPanel';
+import { StartSessionDialog } from './StartSessionDialog';
 import type { SessionManagerResult } from '../../types/sessionState';
 
 interface TaskListViewProps {
@@ -14,7 +15,7 @@ interface TaskListViewProps {
   projectName: string;
   validSessionIds?: Set<string>;
   sessionManager?: SessionManagerResult;
-  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[]) => void;
+  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[], worktree?: { branch: string }) => void;
   onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
 }
@@ -39,6 +40,7 @@ export function TaskListView({
   const [editingDescription, setEditingDescription] = useState('');
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
+  const [startSessionTask, setStartSessionTask] = useState<Task | null>(null);
 
   // Build a map of session statuses for tasks with linked sessions
   const sessionStatusMap = useMemo((): Map<string, SessionStatusInfo> => {
@@ -78,6 +80,22 @@ export function TaskListView({
     setEditingTask(null);
     setEditingTitle('');
     setEditingDescription('');
+  };
+
+  const handleStartSession = (task: Task) => {
+    setStartSessionTask(task);
+  };
+
+  const handleStartSessionConfirm = (
+    name: string,
+    workingDir: string,
+    initialPrompt?: string,
+    taskId?: string,
+    attachments?: TaskAttachment[],
+    worktree?: { branch: string }
+  ) => {
+    onCreateSession?.(name, workingDir, initialPrompt, taskId, attachments, worktree);
+    setStartSessionTask(null);
   };
 
   // Split tasks: left = pending + doing, right = review
@@ -122,7 +140,7 @@ export function TaskListView({
       onEditSubmit={(attachments) => handleEditSubmit(task.id, attachments)}
       onEditTitleChange={setEditingTitle}
       onEditDescriptionChange={setEditingDescription}
-      onCreateSession={onCreateSession}
+      onStartSession={onCreateSession ? () => handleStartSession(task) : undefined}
       onOpenSession={onOpenSession}
       onMarkDone={() => markDone(task)}
       onDelete={() => deleteTask(task.id)}
@@ -232,6 +250,16 @@ export function TaskListView({
         workingDir={projectPath}
         isOpen={showGitPanel}
         onClose={() => setShowGitPanel(false)}
+      />
+      <StartSessionDialog
+        taskTitle={startSessionTask?.title || null}
+        taskDescription={startSessionTask?.description}
+        taskId={startSessionTask?.id}
+        attachments={startSessionTask?.attachments}
+        projectPath={projectPath}
+        open={!!startSessionTask}
+        onOpenChange={(open) => !open && setStartSessionTask(null)}
+        onConfirm={handleStartSessionConfirm}
       />
     </div>
   );

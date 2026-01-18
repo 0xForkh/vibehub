@@ -398,10 +398,11 @@ export function WorkspacePage() {
     workingDir: string,
     initialPrompt?: string,
     taskId?: string,
-    attachments?: { name: string; type: string; size: number; data: string }[]
+    attachments?: { name: string; type: string; size: number; data: string }[],
+    worktree?: { branch: string }
   ) => {
     try {
-      const session = await createClaudeSession(name, workingDir);
+      const session = await createClaudeSession(name, workingDir, undefined, worktree);
       if (session) {
         handleSelectSession(session.id);
         // Store the initial prompt to be sent when the session is ready
