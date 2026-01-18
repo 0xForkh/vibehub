@@ -519,7 +519,7 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
               </div>
 
               {/* Diff Content */}
-              <div className="flex-1 overflow-auto">
+              <div className="flex-1 overflow-auto min-h-0">
                 {diffLoading ? (
                   <div className="flex items-center justify-center h-32 text-sm text-gray-500">
                     Loading diff...
@@ -533,15 +533,18 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
                     No changes to display
                   </div>
                 ) : (
-                  <DiffView
-                    data={{
-                      newFile: { fileName: selectedFile.path },
-                      hunks: [diffContent],
-                    }}
-                    diffViewFontSize={12}
-                    diffViewHighlight
-                    diffViewMode={DiffModeEnum.Unified}
-                  />
+                  <div className="h-full">
+                    <DiffView
+                      data={{
+                        newFile: { fileName: selectedFile.path },
+                        hunks: [diffContent],
+                      }}
+                      diffViewFontSize={12}
+                      diffViewHighlight
+                      diffViewMode={DiffModeEnum.Unified}
+                      diffViewWrap
+                    />
+                  </div>
                 )}
               </div>
             </>
@@ -573,24 +576,26 @@ function FileChangeItem({ file, onClick, isSelected }: FileChangeItemProps) {
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-left transition-colors ${
+      className={`flex w-full items-center gap-1.5 rounded px-2 py-1 text-xs text-left transition-colors ${
         isSelected
           ? 'bg-blue-100 dark:bg-blue-900/30'
           : 'hover:bg-gray-100 dark:hover:bg-gray-800'
       }`}
     >
-      <span className={`w-4 text-center font-mono font-bold ${color}`}>
+      <span className={`flex-shrink-0 w-3 text-center font-mono font-bold ${color}`}>
         {label}
       </span>
       <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${color}`} />
-      <span className="truncate text-gray-800 dark:text-gray-100" title={file.path}>
-        {fileName}
-      </span>
-      {directory && (
-        <span className="flex-shrink-0 truncate text-gray-500 dark:text-gray-400" title={directory}>
-          {directory}
+      <div className="min-w-0 flex-1 flex items-center gap-1">
+        <span className="truncate text-gray-800 dark:text-gray-100" title={file.path}>
+          {fileName}
         </span>
-      )}
+        {directory && (
+          <span className="truncate text-gray-400 dark:text-gray-500" title={directory}>
+            {directory}
+          </span>
+        )}
+      </div>
     </button>
   );
 }

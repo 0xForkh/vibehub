@@ -113,7 +113,7 @@ function TreeItem({
             )}
           </span>
         )}
-        {node.type === 'file' && <span className="w-4" />}
+        {node.type === 'file' && <span className="h-4 w-4 flex-shrink-0" />}
         {getFileIcon(node.name, node.type, node.isExpanded)}
         <span className="truncate text-sm text-gray-700 dark:text-gray-300">{node.name}</span>
       </div>
