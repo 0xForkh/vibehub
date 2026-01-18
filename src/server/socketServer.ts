@@ -33,7 +33,7 @@ export async function server(
   const client = html(title);
   app
     .disable('x-powered-by')
-    .use(express.json())
+    .use(express.json({ limit: '50mb' }))
     .use(metricMiddleware())
     .use('/metrics', metricRoute)
     .use('/client', serveStatic('client'))
