@@ -1,16 +1,18 @@
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, FolderOpen, GitCommitHorizontal } from 'lucide-react';
 import { Button } from '../ui/button';
 import { TaskCard } from './tasks/TaskCard';
 import { TaskAddForm } from './tasks/TaskAddForm';
 import { useTaskList } from './tasks/useTaskList';
-import { getTaskStatus, type Task } from './tasks/types';
+import { getTaskStatus, type Task, type TaskAttachment } from './tasks/types';
+import { FileBrowser } from '../claude/FileBrowser';
+import { GitPanel } from '../claude/GitPanel';
 
 interface TaskListViewProps {
   projectPath: string;
   projectName: string;
   validSessionIds?: Set<string>;
-  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string) => void;
+  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[]) => void;
   onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
 }
@@ -32,12 +34,15 @@ export function TaskListView({
   const [editingTask, setEditingTask] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingDescription, setEditingDescription] = useState('');
+  const [showFileBrowser, setShowFileBrowser] = useState(false);
+  const [showGitPanel, setShowGitPanel] = useState(false);
 
-  const handleEditSubmit = async (taskId: string) => {
+  const handleEditSubmit = async (taskId: string, attachments?: TaskAttachment[]) => {
     if (editingTitle.trim()) {
       await updateTask(taskId, {
         title: editingTitle.trim(),
         description: editingDescription.trim() || undefined,
+        attachments,
       });
     }
     setEditingTask(null);
@@ -89,7 +94,7 @@ export function TaskListView({
         setEditingDescription(task.description || '');
       }}
       onEditCancel={handleCancelEdit}
-      onEditSubmit={() => handleEditSubmit(task.id)}
+      onEditSubmit={(attachments) => handleEditSubmit(task.id, attachments)}
       onEditTitleChange={setEditingTitle}
       onEditDescriptionChange={setEditingDescription}
       onCreateSession={onCreateSession}
@@ -105,11 +110,33 @@ export function TaskListView({
   return (
     <div className="flex h-full flex-col bg-gray-100 dark:bg-gray-900">
       {/* Header */}
-      <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
-          {projectName}
-        </h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">{projectPath}</p>
+      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
+        <div>
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+            {projectName}
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{projectPath}</p>
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowFileBrowser(true)}
+            className="h-8 w-8 p-0"
+            title="Browse files"
+          >
+            <FolderOpen className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowGitPanel(true)}
+            className="h-8 w-8 p-0"
+            title="Git status"
+          >
+            <GitCommitHorizontal className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -133,8 +160,8 @@ export function TaskListView({
           <div className="flex-1 space-y-2 overflow-y-auto p-2">
             {isAdding && (
               <TaskAddForm
-                onSubmit={async (title, description) => {
-                  await createTask(title, description);
+                onSubmit={async (title, description, attachments) => {
+                  await createTask(title, description, attachments);
                   setIsAdding(false);
                 }}
                 onCancel={() => setIsAdding(false)}
@@ -167,6 +194,19 @@ export function TaskListView({
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      <FileBrowser
+        mode="api"
+        workingDir={projectPath}
+        isOpen={showFileBrowser}
+        onClose={() => setShowFileBrowser(false)}
+      />
+      <GitPanel
+        workingDir={projectPath}
+        isOpen={showGitPanel}
+        onClose={() => setShowGitPanel(false)}
+      />
     </div>
   );
 }

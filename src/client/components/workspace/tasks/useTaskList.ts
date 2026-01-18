@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../../../lib/api';
-import type { Task } from './types';
+import type { Task, TaskAttachment } from './types';
 
 interface UseTaskListOptions {
   projectPath: string;
@@ -28,12 +28,13 @@ export function useTaskList({ projectPath, onDeleteSession }: UseTaskListOptions
     return () => clearInterval(interval);
   }, [fetchTasks]);
 
-  const createTask = useCallback(async (title: string, description?: string) => {
+  const createTask = useCallback(async (title: string, description?: string, attachments?: TaskAttachment[]) => {
     const response = await api.post('/api/tasks', {
       title: title.trim(),
       description: description?.trim() || undefined,
       column: 'backlog',
       projectPath,
+      attachments,
     });
     setTasks(prev => [...prev, response.data.task]);
     return response.data.task as Task;

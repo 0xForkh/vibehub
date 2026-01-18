@@ -1,4 +1,4 @@
-import { Plus, Check, MoreVertical, Trash2, Play, ExternalLink, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Plus, Check, MoreVertical, Trash2, Play, ExternalLink, ArrowRight, ArrowLeft, Paperclip } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Badge } from '../../ui/badge';
@@ -8,7 +8,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { getTaskStatus, type Task, type TaskStatus } from './types';
+import { getTaskStatus, type Task, type TaskStatus, type TaskAttachment } from './types';
+import { AttachmentDisplay, FileAttachmentArea } from '../../shared/FileAttachmentArea';
+import { useFileAttachments, type FileAttachment } from '../../../hooks/useFileAttachments';
+import { useEffect } from 'react';
 
 // Suppress unused import warning - Plus is re-exported for TaskAddForm
 void Plus;
@@ -37,10 +40,10 @@ interface TaskCardProps {
   validSessionIds?: Set<string>;
   onEditStart: () => void;
   onEditCancel: () => void;
-  onEditSubmit: () => void;
+  onEditSubmit: (attachments?: TaskAttachment[]) => void;
   onEditTitleChange: (value: string) => void;
   onEditDescriptionChange: (value: string) => void;
-  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string) => void;
+  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[]) => void;
   onOpenSession?: (sessionId: string) => void;
   onMarkDone: () => void;
   onDelete: () => void;
@@ -71,9 +74,76 @@ export function TaskCard({
   const status = getTaskStatus(task, validSessionIds);
   const hasValidSession = task.sessionId && (!validSessionIds || validSessionIds.has(task.sessionId));
 
+  const {
+    attachments,
+    setAttachments,
+    isDragging,
+    fileInputRef,
+    dropZoneRef,
+    handleFileInputChange,
+    handlePaste,
+    removeAttachment,
+    openFilePicker,
+    dragProps,
+    acceptedTypes,
+  } = useFileAttachments([]);
+
+  // Convert TaskAttachment to FileAttachment for display
+  const displayAttachments: FileAttachment[] = (task.attachments || []).map(a => ({
+    name: a.name,
+    type: a.type,
+    size: a.size,
+    data: a.data,
+    preview: a.type.startsWith('image/') ? `data:${a.type};base64,${a.data}` : undefined,
+    dataUrl: a.type.startsWith('image/') ? `data:${a.type};base64,${a.data}` : undefined,
+  }));
+
+  // Reset attachments when editing starts - load from task
+  useEffect(() => {
+    if (isEditing) {
+      const taskAttachments: FileAttachment[] = (task.attachments || []).map(a => ({
+        name: a.name,
+        type: a.type,
+        size: a.size,
+        data: a.data,
+        preview: a.type.startsWith('image/') ? `data:${a.type};base64,${a.data}` : undefined,
+        dataUrl: a.type.startsWith('image/') ? `data:${a.type};base64,${a.data}` : undefined,
+      }));
+      setAttachments(taskAttachments);
+    }
+  }, [isEditing, task.id, setAttachments]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSubmit = () => {
+    const taskAttachments: TaskAttachment[] = attachments.map(a => ({
+      name: a.name,
+      type: a.type,
+      size: a.size,
+      data: a.data,
+    }));
+    onEditSubmit(taskAttachments.length > 0 ? taskAttachments : undefined);
+  };
+
   if (isEditing) {
     return (
-      <div className="rounded-lg bg-white p-4 shadow-sm dark:bg-gray-800">
+      <div
+        ref={dropZoneRef}
+        {...dragProps}
+        className={`relative rounded-lg bg-white p-4 shadow-sm dark:bg-gray-800 ${
+          isDragging ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800' : ''
+        }`}
+      >
+        {/* Drag overlay */}
+        {isDragging && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/30">
+            <div className="text-center">
+              <Paperclip className="mx-auto h-6 w-6 text-blue-500" />
+              <p className="mt-1 text-xs font-medium text-blue-600 dark:text-blue-400">
+                Drop files here
+              </p>
+            </div>
+          </div>
+        )}
+
         <Input
           value={editingTitle}
           onChange={(e) => onEditTitleChange(e.target.value)}
@@ -81,8 +151,9 @@ export function TaskCard({
           autoFocus
           onKeyDown={(e) => {
             if (e.key === 'Escape') onEditCancel();
-            if (e.key === 'Enter') onEditSubmit();
+            if (e.key === 'Enter') handleSubmit();
           }}
+          onPaste={handlePaste}
         />
         <textarea
           ref={(el) => {
@@ -98,23 +169,46 @@ export function TaskCard({
             e.target.style.height = `${e.target.scrollHeight}px`;
           }}
           placeholder="Description (optional)..."
-          className="mb-3 w-full resize-none rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:text-gray-100 dark:placeholder:text-gray-500"
+          className="mb-2 w-full resize-none rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:text-gray-100 dark:placeholder:text-gray-500"
           rows={2}
           onKeyDown={(e) => {
             if (e.key === 'Escape') onEditCancel();
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault();
-              onEditSubmit();
+              handleSubmit();
             }
           }}
+          onPaste={handlePaste}
         />
-        <div className="flex gap-2">
-          <Button size="sm" onClick={onEditSubmit}>
+
+        {/* File attachments */}
+        <FileAttachmentArea
+          attachments={attachments}
+          onRemove={removeAttachment}
+          isDragging={false}
+          dropZoneRef={{ current: null }}
+          fileInputRef={fileInputRef}
+          onFileInputChange={handleFileInputChange}
+          dragProps={{ onDragEnter: () => {}, onDragLeave: () => {}, onDragOver: () => {}, onDrop: () => {} }}
+          acceptedTypes={acceptedTypes}
+          compact
+        />
+
+        <div className="flex items-center gap-2">
+          <Button size="sm" onClick={handleSubmit}>
             Save
           </Button>
           <Button size="sm" variant="ghost" onClick={onEditCancel}>
             Cancel
           </Button>
+          <button
+            type="button"
+            onClick={openFilePicker}
+            className="ml-auto p-1 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+            title="Attach files"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
         </div>
       </div>
     );
@@ -156,7 +250,7 @@ export function TaskCard({
               variant="ghost"
               size="sm"
               className="h-7 w-7 p-0 text-blue-600 hover:bg-blue-100 hover:text-blue-700 dark:text-blue-400 dark:hover:bg-blue-900/30"
-              onClick={() => onCreateSession(task.title, projectPath, task.description, task.id)}
+              onClick={() => onCreateSession(task.title, projectPath, task.description, task.id, task.attachments)}
               title="Start session"
             >
               <Play className="h-4 w-4" />
@@ -218,6 +312,12 @@ export function TaskCard({
           onClick={onEditStart}
         >
           {task.description}
+        </div>
+      )}
+      {/* Attachments display */}
+      {task.attachments && task.attachments.length > 0 && (
+        <div onClick={onEditStart} className="cursor-text">
+          <AttachmentDisplay attachments={displayAttachments} compact />
         </div>
       )}
     </div>
