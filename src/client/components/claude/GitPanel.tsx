@@ -284,26 +284,36 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
         </div>
       }
     >
-      {/* Content - Side by side layout */}
+      {/* Content */}
       <div className="flex-1 flex min-h-0 bg-white dark:bg-gray-900" style={{ maxHeight: '70vh' }}>
-        {/* Left Panel - File List */}
-        <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-auto p-3">
-          {isCommitting || commitResult ? (
-            // Committing / Result View
-            <div>
-              {/* Status header */}
-              <div className={`rounded-md p-3 mb-3 ${
-                commitResult
-                  ? commitResult.success
-                    ? 'bg-green-50 dark:bg-green-900/20'
-                    : 'bg-red-50 dark:bg-red-900/20'
-                  : 'bg-blue-50 dark:bg-blue-900/20'
-              }`}>
-                <div className="flex items-center gap-2">
-                  {isCommitting && (
-                    <GitCommitHorizontal className="h-4 w-4 animate-pulse text-blue-500" />
-                  )}
-                  <div className={`text-sm font-medium ${
+        {/* Dedicated Commit View - Full Width */}
+        {(isCommitting || commitResult) ? (
+          <div className="flex-1 flex flex-col p-6">
+            {/* Status header */}
+            <div className={`rounded-lg p-4 mb-4 ${
+              commitResult
+                ? commitResult.success
+                  ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+            }`}>
+              <div className="flex items-center gap-3">
+                {isCommitting && (
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <GitCommitHorizontal className="h-4 w-4 animate-pulse text-blue-600 dark:text-blue-400" />
+                  </div>
+                )}
+                {commitResult && (
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+                    commitResult.success
+                      ? 'bg-green-100 dark:bg-green-900/40'
+                      : 'bg-red-100 dark:bg-red-900/40'
+                  }`}>
+                    <span className="text-lg">{commitResult.success ? '✓' : '✗'}</span>
+                  </div>
+                )}
+                <div>
+                  <div className={`font-medium ${
                     commitResult
                       ? commitResult.success
                         ? 'text-green-700 dark:text-green-300'
@@ -312,28 +322,44 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
                   }`}>
                     {commitResult
                       ? commitResult.success
-                        ? '✓ Commit successful'
-                        : `✗ ${commitResult.error || 'Commit failed'}`
-                      : commitStatus || 'Starting...'}
+                        ? 'Commit successful'
+                        : commitResult.error || 'Commit failed'
+                      : 'Committing changes...'}
                   </div>
+                  {isCommitting && commitStatus && (
+                    <div className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                      {commitStatus}
+                    </div>
+                  )}
                 </div>
               </div>
+            </div>
 
-              {/* Messages from Claude */}
-              {commitMessages.length > 0 && (
-                <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 mb-3 max-h-64 overflow-y-auto">
-                  <div className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
+            {/* Messages from Claude */}
+            <div className="flex-1 min-h-0 overflow-auto">
+              {commitMessages.length > 0 ? (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+                  <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap space-y-3">
                     {commitMessages.map((msg, i) => (
-                      <div key={i} className={i > 0 ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-800' : ''}>
+                      <div key={i} className={i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}>
                         {msg}
                       </div>
                     ))}
                   </div>
                 </div>
-              )}
+              ) : isCommitting ? (
+                <div className="flex items-center justify-center h-32 text-sm text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Claude is analyzing changes...</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
-              {/* Back button (only when done) */}
-              {commitResult && (
+            {/* Back button (only when done) */}
+            {commitResult && (
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
                 <Button
                   variant="outline"
                   size="sm"
@@ -342,13 +368,18 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
                     setCommitMessages([]);
                     setCommitStatus('');
                   }}
-                  className="w-full"
                 >
-                  Back to changes
+                  ← Back to changes
                 </Button>
-              )}
-            </div>
-          ) : !workingDir ? (
+              </div>
+            )}
+          </div>
+        ) : (
+        /* Side by side layout for normal view */
+        <>
+        {/* Left Panel - File List */}
+        <div className="w-72 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 overflow-auto p-3">
+          {!workingDir ? (
             <div className="text-center text-sm text-gray-500">No working directory</div>
           ) : error ? (
             <div className="text-center text-sm text-red-500">{error}</div>
@@ -554,6 +585,8 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
             </div>
           )}
         </div>
+        </>
+        )}
       </div>
     </ModalPanel>
   );
