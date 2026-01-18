@@ -46,7 +46,15 @@ export async function server(
         colorize: false,
       }),
     )
-    .use(compression())
+    .use(compression({
+      // Don't compress SSE responses - they need to stream immediately
+      filter: (req, res) => {
+        if (req.headers.accept === 'text/event-stream') {
+          return false;
+        }
+        return compression.filter(req, res);
+      },
+    }))
     .use(await favicon())
     .use(redirect)
     .use(policies())
