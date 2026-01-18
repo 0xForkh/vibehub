@@ -76,6 +76,7 @@ export function SessionPanel({
               projectPath={kanbanInfo.projectPath}
               projectName={kanbanInfo.projectName}
               validSessionIds={validSessionIds}
+              sessionManager={sessionManager}
               onCreateSession={onCreateSessionFromTask}
               onOpenSession={onOpenSession}
               onDeleteSession={onDeleteSession}

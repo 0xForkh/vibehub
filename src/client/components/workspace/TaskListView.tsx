@@ -1,17 +1,19 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Plus, FolderOpen, GitCommitHorizontal } from 'lucide-react';
 import { Button } from '../ui/button';
 import { TaskCard } from './tasks/TaskCard';
 import { TaskAddForm } from './tasks/TaskAddForm';
 import { useTaskList } from './tasks/useTaskList';
-import { getTaskStatus, type Task, type TaskAttachment } from './tasks/types';
+import { getTaskStatus, type Task, type TaskAttachment, type SessionStatusInfo } from './tasks/types';
 import { FileBrowser } from '../claude/FileBrowser';
 import { GitPanel } from '../claude/GitPanel';
+import type { SessionManagerResult } from '../../types/sessionState';
 
 interface TaskListViewProps {
   projectPath: string;
   projectName: string;
   validSessionIds?: Set<string>;
+  sessionManager?: SessionManagerResult;
   onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[]) => void;
   onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
@@ -21,6 +23,7 @@ export function TaskListView({
   projectPath,
   projectName,
   validSessionIds,
+  sessionManager,
   onCreateSession,
   onOpenSession,
   onDeleteSession,
@@ -36,6 +39,27 @@ export function TaskListView({
   const [editingDescription, setEditingDescription] = useState('');
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
+
+  // Build a map of session statuses for tasks with linked sessions
+  const sessionStatusMap = useMemo((): Map<string, SessionStatusInfo> => {
+    const map = new Map<string, SessionStatusInfo>();
+    if (!sessionManager) return map;
+
+    tasks.forEach(task => {
+      if (task.sessionId) {
+        const state = sessionManager.sessionStates.get(task.sessionId);
+        if (state) {
+          map.set(task.sessionId, {
+            isThinking: state.thinking,
+            hasPendingPermission: state.pendingRequest !== null,
+            isDone: state.isDone,
+            isConnected: state.isConnected,
+          });
+        }
+      }
+    });
+    return map;
+  }, [sessionManager, tasks]);
 
   const handleEditSubmit = async (taskId: string, attachments?: TaskAttachment[]) => {
     if (editingTitle.trim()) {
@@ -88,6 +112,7 @@ export function TaskListView({
       editingTitle={editingTitle}
       editingDescription={editingDescription}
       validSessionIds={validSessionIds}
+      sessionStatus={task.sessionId ? sessionStatusMap.get(task.sessionId) : undefined}
       onEditStart={() => {
         setEditingTask(task.id);
         setEditingTitle(task.title);
@@ -165,6 +190,7 @@ export function TaskListView({
                   setIsAdding(false);
                 }}
                 onCancel={() => setIsAdding(false)}
+                workingDir={projectPath}
               />
             )}
             {leftTasks.map(task => renderTaskCard(task, 'left'))}

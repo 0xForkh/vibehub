@@ -19,6 +19,16 @@ export interface Task {
 
 export type TaskStatus = 'pending' | 'doing' | 'review';
 
+/**
+ * Real-time session status info for tasks with linked sessions
+ */
+export interface SessionStatusInfo {
+  isThinking: boolean;
+  hasPendingPermission: boolean;
+  isDone: boolean;
+  isConnected: boolean;
+}
+
 export function getTaskStatus(task: Task, validSessionIds?: Set<string>): TaskStatus {
   if (task.column === 'review') return 'review';
   if (task.sessionId && (!validSessionIds || validSessionIds.has(task.sessionId))) return 'doing';
