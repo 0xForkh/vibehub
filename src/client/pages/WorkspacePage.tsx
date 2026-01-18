@@ -402,7 +402,8 @@ export function WorkspacePage() {
     worktree?: { branch: string }
   ) => {
     try {
-      const session = await createClaudeSession(name, workingDir, undefined, worktree);
+      // Sessions created from tasks default to acceptEdits mode
+      const session = await createClaudeSession(name, workingDir, 'acceptEdits', worktree);
       if (session) {
         handleSelectSession(session.id);
         // Store the initial prompt to be sent when the session is ready

@@ -23,6 +23,17 @@ interface StartSessionDialogProps {
   ) => void;
 }
 
+// Convert task title to a valid git branch name
+function titleToBranchName(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '') // Remove special characters
+    .trim()
+    .replace(/\s+/g, '-') // Replace spaces with dashes
+    .replace(/-+/g, '-') // Collapse multiple dashes
+    .slice(0, 50); // Limit length
+}
+
 export function StartSessionDialog({
   taskTitle,
   taskDescription,
@@ -75,7 +86,12 @@ export function StartSessionDialog({
               <input
                 type="checkbox"
                 checked={useWorktree}
-                onChange={(e) => setUseWorktree(e.target.checked)}
+                onChange={(e) => {
+                  setUseWorktree(e.target.checked);
+                  if (e.target.checked && !worktreeBranch && taskTitle) {
+                    setWorktreeBranch(titleToBranchName(taskTitle));
+                  }
+                }}
                 className="h-4 w-4 rounded border-gray-300 bg-white dark:border-gray-600 dark:bg-gray-800"
               />
               <span className="flex items-center gap-1.5 text-sm text-gray-700 dark:text-gray-300">
