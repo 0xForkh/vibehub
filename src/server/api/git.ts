@@ -301,83 +301,114 @@ router.get('/diff', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/git/commit - Ask Claude to review and commit changes
+ * POST /api/git/commit - Ask Claude to review and commit changes (SSE stream)
  * Body:
  *   - path: directory path (required)
+ *
+ * Returns Server-Sent Events with progress updates:
+ *   - event: status, data: { status: string } - Current operation status
+ *   - event: tool, data: { tool: string, input: string } - Tool being used
+ *   - event: message, data: { text: string } - Text from Claude
+ *   - event: done, data: { success: boolean, error?: string }
  */
 router.post('/commit', async (req: Request, res: Response) => {
+  const { path: dirPath } = req.body;
+
+  if (!dirPath) {
+    res.status(400).json({ error: 'Path is required' });
+    return;
+  }
+
+  if (!await isGitRepo(dirPath)) {
+    res.status(400).json({ error: 'Not a git repository' });
+    return;
+  }
+
+  // Check if there are changes to commit
   try {
-    const { path: dirPath } = req.body;
-
-    if (!dirPath) {
-      res.status(400).json({ error: 'Path is required' });
-      return;
-    }
-
-    if (!await isGitRepo(dirPath)) {
-      res.status(400).json({ error: 'Not a git repository' });
-      return;
-    }
-
-    // Check if there are changes to commit
     const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: dirPath });
     if (!statusOutput.trim()) {
       res.status(400).json({ error: 'No changes to commit' });
       return;
     }
+  } catch {
+    res.status(500).json({ error: 'Failed to check git status' });
+    return;
+  }
 
-    logger.info('Starting Claude commit', { dirPath });
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
 
-    const messages: string[] = [];
-    let error: string | null = null;
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
 
-    const agent = new ClaudeAgentService({
-      workingDir: dirPath,
-      // Use acceptEdits mode - bypassPermissions requires an existing session
-      permissionMode: 'acceptEdits',
-      onMessage: (message) => {
-        // Collect assistant text messages for the response
-        if (message.type === 'assistant' && typeof message.message?.content === 'string') {
-          messages.push(message.message.content);
-        } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
-          for (const block of message.message.content) {
-            if (block.type === 'text' && block.text) {
-              messages.push(block.text);
-            }
+  logger.info('Starting Claude commit', { dirPath });
+  sendEvent('status', { status: 'Starting commit process...' });
+
+  let error: string | null = null;
+
+  const agent = new ClaudeAgentService({
+    workingDir: dirPath,
+    permissionMode: 'acceptEdits',
+    onMessage: (message) => {
+      // Stream text messages
+      if (message.type === 'assistant' && typeof message.message?.content === 'string') {
+        sendEvent('message', { text: message.message.content });
+      } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) {
+            sendEvent('message', { text: block.text });
           }
         }
-      },
-      onPermissionRequest: async (_toolName, input) => 
-        // Auto-approve all permission requests for commit operations
-         ({ behavior: 'allow' as const, updatedInput: input })
-      ,
-      onError: (err) => {
-        error = err.message;
-        logger.error('Claude commit error', { error: err.message });
-      },
-      onComplete: () => {
-        logger.info('Claude commit completed');
-      },
-    });
+      }
+    },
+    onPermissionRequest: async (toolName, input) => {
+      // Send tool usage info to client
+      let description = toolName;
+      if (toolName === 'Bash' && typeof input.command === 'string') {
+        // Extract a brief description from the command
+        const cmd = input.command as string;
+        if (cmd.startsWith('git add')) {
+          description = 'Staging files...';
+        } else if (cmd.startsWith('git commit')) {
+          description = 'Creating commit...';
+        } else if (cmd.startsWith('git status') || cmd.startsWith('git diff')) {
+          description = 'Reviewing changes...';
+        } else {
+          description = `Running: ${cmd.slice(0, 50)}${cmd.length > 50 ? '...' : ''}`;
+        }
+      }
+      sendEvent('tool', { tool: toolName, description });
+      return { behavior: 'allow' as const, updatedInput: input };
+    },
+    onError: (err) => {
+      error = err.message;
+      logger.error('Claude commit error', { error: err.message });
+    },
+    onComplete: () => {
+      logger.info('Claude commit completed');
+    },
+  });
 
-    const prompt = `Review all changed files (staged and unstaged) and commit them.
+  const prompt = `Review all changed files (staged and unstaged) and commit them.
 Split into multiple commits by feature/purpose if appropriate.
 Use clear, descriptive commit messages.
 Do NOT push to remote.
 After committing, briefly summarize what was committed.`;
 
+  try {
     await agent.start(prompt);
-
-    if (error) {
-      res.status(500).json({ error, messages });
-      return;
-    }
-
-    res.json({ success: true, messages });
+    sendEvent('done', { success: !error, error: error || undefined });
   } catch (err) {
     logger.error('Failed to run Claude commit', { err });
-    res.status(500).json({ error: 'Failed to run Claude commit' });
+    sendEvent('done', { success: false, error: 'Failed to run Claude commit' });
   }
+
+  res.end();
 });
 
 export { router as gitRouter };

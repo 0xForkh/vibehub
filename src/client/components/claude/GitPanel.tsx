@@ -89,7 +89,9 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
 
   // Commit state
   const [isCommitting, setIsCommitting] = useState(false);
-  const [commitResult, setCommitResult] = useState<{ success: boolean; messages: string[] } | null>(null);
+  const [commitStatus, setCommitStatus] = useState<string>('');
+  const [commitMessages, setCommitMessages] = useState<string[]>([]);
+  const [commitResult, setCommitResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const fetchGitData = useCallback(async () => {
     if (!workingDir) return;
@@ -172,28 +174,73 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
 
     setIsCommitting(true);
     setCommitResult(null);
+    setCommitStatus('Starting...');
+    setCommitMessages([]);
     setError(null);
 
     try {
-      const res = await fetch('/api/git/commit', {
+      const response = await fetch('/api/git/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: workingDir }),
       });
 
-      const data = await res.json();
-
-      if (!res.ok) {
+      // Check if it's an SSE response or error JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType?.includes('application/json')) {
+        const data = await response.json();
         setError(data.error || 'Failed to commit');
-        setCommitResult({ success: false, messages: data.messages || [] });
-      } else {
-        setCommitResult({ success: true, messages: data.messages || [] });
-        // Refresh git data after successful commit
-        fetchGitData();
+        setCommitResult({ success: false, error: data.error });
+        setIsCommitting(false);
+        return;
+      }
+
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'status') {
+                setCommitStatus(data.status);
+              } else if (currentEvent === 'tool') {
+                setCommitStatus(data.description);
+              } else if (currentEvent === 'message') {
+                setCommitMessages(prev => [...prev, data.text]);
+              } else if (currentEvent === 'done') {
+                setCommitResult({ success: data.success, error: data.error });
+                if (data.success) {
+                  fetchGitData();
+                }
+              }
+            } catch {
+              // Ignore parse errors
+            }
+            currentEvent = '';
+          }
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to commit');
-      setCommitResult({ success: false, messages: [] });
+      setCommitResult({ success: false, error: 'Connection error' });
     } finally {
       setIsCommitting(false);
     }
@@ -294,38 +341,65 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
               )}
             </div>
           </div>
-        ) : isCommitting ? (
-          // Committing View
-          <div className="flex flex-col items-center justify-center p-8 text-center">
-            <GitCommitHorizontal className="h-8 w-8 animate-pulse text-blue-500 mb-3" />
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300">
-              Claude is reviewing and committing changes...
-            </div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              This may take a moment
-            </div>
-          </div>
-        ) : commitResult ? (
-          // Commit Result View
+        ) : isCommitting || commitResult ? (
+          // Committing / Result View
           <div className="p-3">
-            <div className={`rounded-md p-3 mb-3 ${commitResult.success ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
-              <div className={`text-sm font-medium ${commitResult.success ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>
-                {commitResult.success ? '✓ Commit successful' : '✗ Commit failed'}
-              </div>
-              {commitResult.messages.length > 0 && (
-                <div className="mt-2 text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
-                  {commitResult.messages.join('\n')}
+            {/* Status header */}
+            <div className={`rounded-md p-3 mb-3 ${
+              commitResult
+                ? commitResult.success
+                  ? 'bg-green-50 dark:bg-green-900/20'
+                  : 'bg-red-50 dark:bg-red-900/20'
+                : 'bg-blue-50 dark:bg-blue-900/20'
+            }`}>
+              <div className="flex items-center gap-2">
+                {isCommitting && (
+                  <GitCommitHorizontal className="h-4 w-4 animate-pulse text-blue-500" />
+                )}
+                <div className={`text-sm font-medium ${
+                  commitResult
+                    ? commitResult.success
+                      ? 'text-green-700 dark:text-green-300'
+                      : 'text-red-700 dark:text-red-300'
+                    : 'text-blue-700 dark:text-blue-300'
+                }`}>
+                  {commitResult
+                    ? commitResult.success
+                      ? '✓ Commit successful'
+                      : `✗ ${commitResult.error || 'Commit failed'}`
+                    : commitStatus || 'Starting...'}
                 </div>
-              )}
+              </div>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCommitResult(null)}
-              className="w-full"
-            >
-              Back to changes
-            </Button>
+
+            {/* Messages from Claude */}
+            {commitMessages.length > 0 && (
+              <div className="rounded-md border border-gray-200 dark:border-gray-700 p-3 mb-3 max-h-64 overflow-y-auto">
+                <div className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap">
+                  {commitMessages.map((msg, i) => (
+                    <div key={i} className={i > 0 ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-800' : ''}>
+                      {msg}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Back button (only when done) */}
+            {commitResult && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setCommitResult(null);
+                  setCommitMessages([]);
+                  setCommitStatus('');
+                }}
+                className="w-full"
+              >
+                Back to changes
+              </Button>
+            )}
           </div>
         ) : (
           // File List View
