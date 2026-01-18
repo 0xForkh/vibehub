@@ -470,6 +470,12 @@ export function ClaudePaneView({
           workingDir={workingDir}
           isOpen={showGitPanel}
           onClose={() => setShowGitPanel(false)}
+          onWorktreeMerged={() => {
+            // When worktree is merged and deleted, delete the session
+            if (onDelete && worktreePath) {
+              onDelete(sessionId, false); // Worktree already deleted by merge
+            }
+          }}
         />
         <TerminalPane
           sessionId={sessionId}

@@ -3,7 +3,17 @@ import { promisify } from 'util';
 import { Router, type Router as ExpressRouter, Request, Response } from 'express';
 import { logger as getLogger } from '../../shared/logger.js';
 import { ClaudeAgentService } from '../claude/ClaudeAgentService.js';
-import { isGitRepo } from '../utils/gitWorktree.js';
+import {
+  isGitRepo,
+  isWorktree,
+  getMainRepoPath,
+  getCurrentBranch,
+  getDefaultBranch,
+  hasUncommittedChanges,
+  mergeBranch,
+  deleteBranch,
+  removeWorktree,
+} from '../utils/gitWorktree.js';
 
 const execAsync = promisify(exec);
 const router: ExpressRouter = Router();
@@ -411,6 +421,179 @@ After committing, briefly summarize what was committed.`;
   } catch (err) {
     logger.error('Failed to run Claude commit', { err });
     sendEvent('done', { success: false, error: 'Failed to run Claude commit' });
+  }
+
+  res.end();
+});
+
+/**
+ * GET /api/git/worktree-info - Get worktree merge info
+ * Query params:
+ *   - path: worktree directory path (required)
+ */
+router.get('/worktree-info', async (req: Request, res: Response) => {
+  try {
+    const dirPath = req.query.path as string;
+
+    if (!dirPath) {
+      res.status(400).json({ error: 'Path is required' });
+      return;
+    }
+
+    // Check if it's a worktree
+    const isWt = await isWorktree(dirPath);
+    if (!isWt) {
+      res.json({ isWorktree: false });
+      return;
+    }
+
+    // Get worktree info
+    const mainRepoPath = await getMainRepoPath(dirPath);
+    const currentBranch = await getCurrentBranch(dirPath);
+    const defaultBranch = mainRepoPath ? await getDefaultBranch(mainRepoPath) : 'main';
+    const hasChanges = await hasUncommittedChanges(dirPath);
+
+    res.json({
+      isWorktree: true,
+      mainRepoPath,
+      currentBranch,
+      defaultBranch,
+      hasUncommittedChanges: hasChanges,
+    });
+  } catch (err) {
+    logger.error('Failed to get worktree info', { err });
+    res.status(500).json({ error: 'Failed to get worktree info' });
+  }
+});
+
+/**
+ * POST /api/git/merge-worktree - Merge worktree branch to target and cleanup
+ * Body:
+ *   - worktreePath: path to worktree (required)
+ *   - targetBranch: branch to merge into (default: main/master)
+ *   - deleteWorktree: remove worktree after merge (default: true)
+ *   - deleteBranch: delete source branch after merge (default: true)
+ *
+ * Returns SSE stream with progress updates
+ */
+router.post('/merge-worktree', async (req: Request, res: Response) => {
+  const {
+    worktreePath,
+    targetBranch: targetBranchParam,
+    deleteWorktree = true,
+    deleteBranch: deleteBranchFlag = true,
+  } = req.body;
+
+  if (!worktreePath) {
+    res.status(400).json({ error: 'worktreePath is required' });
+    return;
+  }
+
+  // Validate it's a worktree
+  const isWt = await isWorktree(worktreePath);
+  if (!isWt) {
+    res.status(400).json({ error: 'Path is not a git worktree' });
+    return;
+  }
+
+  const mainRepoPath = await getMainRepoPath(worktreePath);
+  if (!mainRepoPath) {
+    res.status(400).json({ error: 'Could not find main repository' });
+    return;
+  }
+
+  const sourceBranch = await getCurrentBranch(worktreePath);
+  if (!sourceBranch) {
+    res.status(400).json({ error: 'Could not determine worktree branch' });
+    return;
+  }
+
+  const targetBranch = targetBranchParam || await getDefaultBranch(mainRepoPath);
+
+  // Check for uncommitted changes
+  const hasChanges = await hasUncommittedChanges(worktreePath);
+  if (hasChanges) {
+    res.status(400).json({ error: 'Worktree has uncommitted changes. Please commit or stash them first.' });
+    return;
+  }
+
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+      (res as unknown as { flush: () => void }).flush();
+    }
+  };
+
+  logger.info('Starting worktree merge', { worktreePath, sourceBranch, targetBranch });
+
+  try {
+    // Step 1: Merge
+    sendEvent('status', { step: 'merge', message: `Merging ${sourceBranch} into ${targetBranch}...` });
+    const mergeResult = await mergeBranch(mainRepoPath, sourceBranch, targetBranch);
+
+    if (!mergeResult.success) {
+      sendEvent('done', {
+        success: false,
+        error: mergeResult.error,
+        conflictFiles: mergeResult.conflictFiles,
+      });
+      res.end();
+      return;
+    }
+
+    sendEvent('status', { step: 'merge', message: 'Merge successful' });
+
+    // Step 2: Remove worktree (if requested)
+    if (deleteWorktree) {
+      sendEvent('status', { step: 'worktree', message: 'Removing worktree...' });
+      const removeResult = await removeWorktree(mainRepoPath, worktreePath, true);
+
+      if (!removeResult.success) {
+        sendEvent('done', {
+          success: false,
+          error: `Merge succeeded but failed to remove worktree: ${removeResult.error}`,
+          mergeSucceeded: true,
+        });
+        res.end();
+        return;
+      }
+
+      sendEvent('status', { step: 'worktree', message: 'Worktree removed' });
+    }
+
+    // Step 3: Delete branch (if requested)
+    if (deleteBranchFlag) {
+      sendEvent('status', { step: 'branch', message: `Deleting branch ${sourceBranch}...` });
+      const branchResult = await deleteBranch(mainRepoPath, sourceBranch, true);
+
+      if (!branchResult.success) {
+        sendEvent('done', {
+          success: true, // Merge succeeded, branch deletion is non-critical
+          warning: `Merge succeeded but failed to delete branch: ${branchResult.error}`,
+        });
+        res.end();
+        return;
+      }
+
+      sendEvent('status', { step: 'branch', message: 'Branch deleted' });
+    }
+
+    sendEvent('done', {
+      success: true,
+      message: `Successfully merged ${sourceBranch} into ${targetBranch}`,
+      deletedWorktree: deleteWorktree,
+      deletedBranch: deleteBranchFlag,
+    });
+  } catch (err) {
+    logger.error('Failed to merge worktree', { err });
+    sendEvent('done', { success: false, error: 'Unexpected error during merge' });
   }
 
   res.end();

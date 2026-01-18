@@ -301,3 +301,109 @@ export async function getCurrentBranch(dir: string): Promise<string | null> {
     return null;
   }
 }
+
+/**
+ * Check if a directory has uncommitted changes
+ */
+export async function hasUncommittedChanges(dir: string): Promise<boolean> {
+  try {
+    const { stdout } = await execAsync('git status --porcelain', { cwd: dir });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get the default branch name (main or master)
+ */
+export async function getDefaultBranch(dir: string): Promise<string> {
+  try {
+    // Check if 'main' exists
+    const { stdout } = await execAsync('git branch --list main master', { cwd: dir });
+    const branches = stdout.trim().split('\n').map(b => b.trim().replace('* ', ''));
+    if (branches.includes('main')) return 'main';
+    if (branches.includes('master')) return 'master';
+    return 'main'; // Default fallback
+  } catch {
+    return 'main';
+  }
+}
+
+/**
+ * Merge a branch into another branch
+ */
+export async function mergeBranch(
+  repoDir: string,
+  sourceBranch: string,
+  targetBranch: string
+): Promise<{ success: boolean; error?: string; conflictFiles?: string[] }> {
+  logger.info('Merging branch', { repoDir, sourceBranch, targetBranch });
+
+  try {
+    // Store current branch to restore later
+    const { stdout: originalBranch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: repoDir });
+
+    // Checkout target branch
+    await execAsync(`git checkout "${targetBranch}"`, { cwd: repoDir });
+
+    try {
+      // Attempt merge
+      await execAsync(`git merge "${sourceBranch}" --no-edit`, { cwd: repoDir });
+      logger.info('Branch merged successfully', { sourceBranch, targetBranch });
+
+      // Restore original branch if different
+      if (originalBranch.trim() !== targetBranch) {
+        await execAsync(`git checkout "${originalBranch.trim()}"`, { cwd: repoDir });
+      }
+
+      return { success: true };
+    } catch (mergeErr) {
+      // Check for merge conflicts
+      const { stdout: conflictOutput } = await execAsync('git diff --name-only --diff-filter=U', { cwd: repoDir });
+      const conflictFiles = conflictOutput.trim().split('\n').filter(f => f);
+
+      if (conflictFiles.length > 0) {
+        // Abort the merge
+        await execAsync('git merge --abort', { cwd: repoDir });
+        // Restore original branch
+        if (originalBranch.trim() !== targetBranch) {
+          await execAsync(`git checkout "${originalBranch.trim()}"`, { cwd: repoDir });
+        }
+        return {
+          success: false,
+          error: 'Merge conflicts detected',
+          conflictFiles,
+        };
+      }
+
+      throw mergeErr;
+    }
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Failed to merge branch', { error, sourceBranch, targetBranch });
+    return { success: false, error };
+  }
+}
+
+/**
+ * Delete a local branch
+ */
+export async function deleteBranch(
+  repoDir: string,
+  branch: string,
+  force = false
+): Promise<{ success: boolean; error?: string }> {
+  logger.info('Deleting branch', { repoDir, branch, force });
+
+  try {
+    const flag = force ? '-D' : '-d';
+    await execAsync(`git branch ${flag} "${branch}"`, { cwd: repoDir });
+    logger.info('Branch deleted successfully', { branch });
+    return { success: true };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    logger.error('Failed to delete branch', { error, branch });
+    return { success: false, error };
+  }
+}

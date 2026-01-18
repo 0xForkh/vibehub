@@ -1,4 +1,4 @@
-import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal } from 'lucide-react';
+import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal, GitMerge, AlertTriangle } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { DiffView, DiffModeEnum } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
@@ -9,6 +9,15 @@ interface GitPanelProps {
   workingDir: string | undefined;
   isOpen: boolean;
   onClose: () => void;
+  onWorktreeMerged?: () => void; // Callback when worktree is merged and deleted
+}
+
+interface WorktreeInfo {
+  isWorktree: boolean;
+  mainRepoPath?: string;
+  currentBranch?: string;
+  defaultBranch?: string;
+  hasUncommittedChanges?: boolean;
 }
 
 interface GitFileChange {
@@ -66,7 +75,7 @@ const statusLabels: Record<GitFileChange['status'], string> = {
   untracked: '?',
 };
 
-export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
+export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitPanelProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -92,6 +101,14 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
   const [commitStatus, setCommitStatus] = useState<string>('');
   const [commitMessages, setCommitMessages] = useState<string[]>([]);
   const [commitResult, setCommitResult] = useState<{ success: boolean; error?: string } | null>(null);
+
+  // Worktree merge state
+  const [worktreeInfo, setWorktreeInfo] = useState<WorktreeInfo | null>(null);
+  const [showMergeConfirm, setShowMergeConfirm] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeStatus, setMergeStatus] = useState<string>('');
+  const [mergeResult, setMergeResult] = useState<{ success: boolean; error?: string; warning?: string; conflictFiles?: string[] } | null>(null);
+  const [mergeOptions, setMergeOptions] = useState({ deleteWorktree: true, deleteBranch: true });
 
   const fetchGitData = useCallback(async () => {
     if (!workingDir) return;
@@ -127,11 +144,28 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
     }
   }, [workingDir]);
 
+  const fetchWorktreeInfo = useCallback(async () => {
+    if (!workingDir) return;
+
+    try {
+      const encodedPath = encodeURIComponent(workingDir);
+      const res = await fetch(`/api/git/worktree-info?path=${encodedPath}`);
+      if (res.ok) {
+        const data = await res.json();
+        setWorktreeInfo(data);
+      }
+    } catch (err) {
+      // Non-critical, just don't show merge button
+      setWorktreeInfo(null);
+    }
+  }, [workingDir]);
+
   useEffect(() => {
     if (isOpen && workingDir) {
       fetchGitData();
+      fetchWorktreeInfo();
     }
-  }, [isOpen, workingDir, fetchGitData]);
+  }, [isOpen, workingDir, fetchGitData, fetchWorktreeInfo]);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
@@ -240,7 +274,92 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
     }
   }, [workingDir, isCommitting, fetchGitData]);
 
+  const handleMergeWorktree = useCallback(async () => {
+    if (!workingDir || isMerging || !worktreeInfo?.isWorktree) return;
+
+    setIsMerging(true);
+    setMergeResult(null);
+    setMergeStatus('Starting merge...');
+    setShowMergeConfirm(false);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/git/merge-worktree', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          worktreePath: workingDir,
+          targetBranch: worktreeInfo.defaultBranch,
+          deleteWorktree: mergeOptions.deleteWorktree,
+          deleteBranch: mergeOptions.deleteBranch,
+        }),
+      });
+
+      // Check if it's an SSE response or error JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType?.includes('application/json')) {
+        const data = await response.json();
+        setError(data.error || 'Failed to merge');
+        setMergeResult({ success: false, error: data.error });
+        setIsMerging(false);
+        return;
+      }
+
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'status') {
+                setMergeStatus(data.message);
+              } else if (currentEvent === 'done') {
+                setMergeResult({
+                  success: data.success,
+                  error: data.error,
+                  warning: data.warning,
+                  conflictFiles: data.conflictFiles,
+                });
+                if (data.success && mergeOptions.deleteWorktree && onWorktreeMerged) {
+                  // Notify parent that worktree was merged and deleted
+                  onWorktreeMerged();
+                }
+              }
+            } catch {
+              // Ignore parse errors
+            }
+            currentEvent = '';
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to merge');
+      setMergeResult({ success: false, error: 'Connection error' });
+    } finally {
+      setIsMerging(false);
+    }
+  }, [workingDir, isMerging, worktreeInfo, mergeOptions, onWorktreeMerged]);
+
   const changeCount = status ? status.staged.length + status.unstaged.length : 0;
+  const canMerge = worktreeInfo?.isWorktree && !worktreeInfo?.hasUncommittedChanges;
 
   return (
     <ModalPanel
@@ -263,7 +382,7 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
               variant="ghost"
               size="sm"
               onClick={handleCommit}
-              disabled={isLoading || isCommitting}
+              disabled={isLoading || isCommitting || isMerging}
               className="h-6 gap-1 px-2 text-xs"
               title="Ask Claude to commit changes"
             >
@@ -271,11 +390,76 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
               {isCommitting ? 'Committing...' : 'Commit'}
             </Button>
           )}
+          {worktreeInfo?.isWorktree && (
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowMergeConfirm(true)}
+                disabled={isLoading || isCommitting || isMerging || !canMerge}
+                className="h-6 gap-1 px-2 text-xs"
+                title={canMerge ? `Merge ${worktreeInfo.currentBranch} into ${worktreeInfo.defaultBranch}` : 'Commit changes before merging'}
+              >
+                <GitMerge className={`h-3 w-3 ${isMerging ? 'animate-pulse' : ''}`} />
+                {isMerging ? 'Merging...' : 'Merge'}
+              </Button>
+              {showMergeConfirm && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMergeConfirm(false)} />
+                  <div className="absolute right-0 top-full z-50 mt-1 w-72 rounded-md border border-gray-200 bg-white p-3 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+                    <div className="mb-3 text-sm font-medium text-gray-900 dark:text-white">
+                      Merge Worktree
+                    </div>
+                    <div className="mb-3 text-xs text-gray-600 dark:text-gray-400">
+                      Merge <span className="font-mono text-blue-600 dark:text-blue-400">{worktreeInfo.currentBranch}</span> into <span className="font-mono text-green-600 dark:text-green-400">{worktreeInfo.defaultBranch}</span>
+                    </div>
+                    <div className="mb-3 space-y-2">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-700 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={mergeOptions.deleteWorktree}
+                          onChange={(e) => setMergeOptions(prev => ({ ...prev, deleteWorktree: e.target.checked }))}
+                          className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
+                        />
+                        Delete worktree after merge
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-700 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={mergeOptions.deleteBranch}
+                          onChange={(e) => setMergeOptions(prev => ({ ...prev, deleteBranch: e.target.checked }))}
+                          className="h-3.5 w-3.5 rounded border-gray-300 dark:border-gray-600"
+                        />
+                        Delete branch after merge
+                      </label>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowMergeConfirm(false)}
+                        className="h-7 text-xs"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handleMergeWorktree}
+                        className="h-7 bg-green-600 hover:bg-green-700 text-xs"
+                      >
+                        Merge
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <Button
             variant="ghost"
             size="sm"
-            onClick={fetchGitData}
-            disabled={isLoading || isCommitting}
+            onClick={() => { fetchGitData(); fetchWorktreeInfo(); }}
+            disabled={isLoading || isCommitting || isMerging}
             className="h-6 w-6 p-0"
             title="Refresh"
           >
@@ -286,8 +470,95 @@ export function GitPanel({ workingDir, isOpen, onClose }: GitPanelProps) {
     >
       {/* Content */}
       <div className="flex-1 flex min-h-0 bg-white dark:bg-gray-900" style={{ maxHeight: '70vh' }}>
-        {/* Dedicated Commit View - Full Width */}
-        {(isCommitting || commitResult) ? (
+        {/* Dedicated Merge View - Full Width */}
+        {(isMerging || mergeResult) ? (
+          <div className="flex-1 flex flex-col p-6">
+            {/* Status header */}
+            <div className={`rounded-lg p-4 mb-4 ${
+              mergeResult
+                ? mergeResult.success
+                  ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+            }`}>
+              <div className="flex items-center gap-3">
+                {isMerging && (
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <GitMerge className="h-4 w-4 animate-pulse text-blue-600 dark:text-blue-400" />
+                  </div>
+                )}
+                {mergeResult && (
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+                    mergeResult.success
+                      ? 'bg-green-100 dark:bg-green-900/40'
+                      : 'bg-red-100 dark:bg-red-900/40'
+                  }`}>
+                    <span className="text-lg">{mergeResult.success ? '✓' : '✗'}</span>
+                  </div>
+                )}
+                <div>
+                  <div className={`font-medium ${
+                    mergeResult
+                      ? mergeResult.success
+                        ? 'text-green-700 dark:text-green-300'
+                        : 'text-red-700 dark:text-red-300'
+                      : 'text-blue-700 dark:text-blue-300'
+                  }`}>
+                    {mergeResult
+                      ? mergeResult.success
+                        ? 'Merge successful'
+                        : mergeResult.error || 'Merge failed'
+                      : 'Merging worktree...'}
+                  </div>
+                  {isMerging && mergeStatus && (
+                    <div className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                      {mergeStatus}
+                    </div>
+                  )}
+                  {mergeResult?.warning && (
+                    <div className="flex items-center gap-1 text-sm text-yellow-600 dark:text-yellow-400 mt-1">
+                      <AlertTriangle className="h-3 w-3" />
+                      {mergeResult.warning}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Conflict files */}
+            {mergeResult?.conflictFiles && mergeResult.conflictFiles.length > 0 && (
+              <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 mb-4">
+                <div className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">
+                  Conflicting files:
+                </div>
+                <ul className="text-xs text-red-600 dark:text-red-400 font-mono space-y-1">
+                  {mergeResult.conflictFiles.map((file, i) => (
+                    <li key={i}>• {file}</li>
+                  ))}
+                </ul>
+                <div className="mt-3 text-xs text-red-600 dark:text-red-400">
+                  Please resolve conflicts manually before merging.
+                </div>
+              </div>
+            )}
+
+            {/* Back button (only when done) */}
+            {mergeResult && (
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setMergeResult(null);
+                    setMergeStatus('');
+                  }}
+                >
+                  ← Back to changes
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (isCommitting || commitResult) ? (
           <div className="flex-1 flex flex-col p-6">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${
