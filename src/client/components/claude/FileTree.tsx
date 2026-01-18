@@ -16,13 +16,24 @@ interface TreeNode extends FileEntry {
   isExpanded?: boolean;
 }
 
-interface FileTreeProps {
+// Props for socket-based mode (Claude sessions)
+interface SocketModeProps {
+  mode: 'socket';
   sessionId: string;
   socket: Socket | null;
+}
+
+// Props for API-based mode (Task list)
+interface ApiModeProps {
+  mode: 'api';
+  workingDir: string;
+}
+
+type FileTreeProps = (SocketModeProps | ApiModeProps) & {
   onFileSelect: (path: string) => void;
   selectedPath: string | null;
   showHidden: boolean;
-}
+};
 
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'];
 
@@ -124,42 +135,72 @@ function TreeItem({
   );
 }
 
-export function FileTree({ sessionId, socket, onFileSelect, selectedPath, showHidden }: FileTreeProps) {
+export function FileTree(props: FileTreeProps) {
+  const { onFileSelect, selectedPath, showHidden } = props;
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load directory with showHidden option
+  // Extract stable values for dependencies
+  const mode = props.mode;
+  const socket = props.mode === 'socket' ? props.socket : null;
+  const sessionId = props.mode === 'socket' ? props.sessionId : null;
+  const workingDir = props.mode === 'api' ? props.workingDir : null;
+
+  // Load directory - works with both socket and API modes
   const loadDirectory = useCallback(
     (path: string, callback: (entries: FileEntry[]) => void) => {
-      if (!socket) return;
+      if (mode === 'socket') {
+        if (!socket) return;
 
-      const handleResult = ({ path: resultPath, entries, error: err }: {
-        path: string;
-        entries: FileEntry[];
-        error?: string
-      }) => {
-        if (resultPath === path) {
-          socket.off('claude:fs_list_result', handleResult);
-          if (err) {
-            setError(err);
-          } else {
-            callback(entries);
+        const handleResult = ({ path: resultPath, entries, error: err }: {
+          path: string;
+          entries: FileEntry[];
+          error?: string
+        }) => {
+          if (resultPath === path) {
+            socket.off('claude:fs_list_result', handleResult);
+            if (err) {
+              setError(err);
+            } else {
+              callback(entries);
+            }
           }
-        }
-      };
+        };
 
-      socket.on('claude:fs_list_result', handleResult);
-      socket.emit('claude:fs_list', { sessionId, path, showHidden });
+        socket.on('claude:fs_list_result', handleResult);
+        socket.emit('claude:fs_list', { sessionId, path, showHidden });
+      } else {
+        // API mode
+        if (!workingDir) return;
+        const encodedPath = encodeURIComponent(workingDir);
+        const encodedSubpath = encodeURIComponent(path);
+
+        fetch(`/api/files/list?path=${encodedPath}&subpath=${encodedSubpath}&showHidden=${showHidden}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data.error) {
+              setError(data.error);
+            } else {
+              callback(data.entries || []);
+            }
+          })
+          .catch(err => {
+            setError(err.message || 'Failed to load directory');
+          });
+      }
     },
-    [socket, sessionId, showHidden]
+    [mode, socket, sessionId, workingDir, showHidden]
   );
 
-  // Load root on mount or when showHidden changes
+  // Load root on mount or when key dependencies change
   useEffect(() => {
-    if (socket) {
+    const canLoad = mode === 'socket' ? !!socket : !!workingDir;
+
+    if (canLoad) {
       setIsLoading(true);
       setNodes([]);
+      setError(null);
       loadDirectory('.', (entries) => {
         setNodes(
           entries.map((e) => ({
@@ -171,7 +212,7 @@ export function FileTree({ sessionId, socket, onFileSelect, selectedPath, showHi
         setIsLoading(false);
       });
     }
-  }, [socket, loadDirectory]);
+  }, [mode, socket, workingDir, loadDirectory]);
 
   const handleToggle = useCallback(
     (path: string) => {

@@ -6,14 +6,26 @@ import { FileTree, isImageFile } from './FileTree';
 import { FilePreview } from './FilePreview';
 import type { Socket } from 'socket.io-client';
 
-interface FileBrowserProps {
+// Props for socket-based mode (Claude sessions)
+interface SocketModeProps {
+  mode: 'socket';
   sessionId: string;
   socket: Socket | null;
-  isOpen: boolean;
-  onClose: () => void;
 }
 
-export function FileBrowser({ sessionId, socket, isOpen, onClose }: FileBrowserProps) {
+// Props for API-based mode (Task list)
+interface ApiModeProps {
+  mode: 'api';
+  workingDir: string;
+}
+
+type FileBrowserProps = (SocketModeProps | ApiModeProps) & {
+  isOpen: boolean;
+  onClose: () => void;
+};
+
+export function FileBrowser(props: FileBrowserProps) {
+  const { isOpen, onClose } = props;
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [treeKey, setTreeKey] = useState(0);
   // On mobile, track whether we're viewing the file list or file preview
@@ -51,7 +63,7 @@ export function FileBrowser({ sessionId, socket, isOpen, onClose }: FileBrowserP
       onClose={handleClose}
       title="File Browser"
       icon={<FolderOpen className="h-4 w-4 text-yellow-500" />}
-      width="4xl"
+      width="6xl"
       toolbar={
         <>
           {/* Back button - mobile only, when viewing preview */}
@@ -79,25 +91,47 @@ export function FileBrowser({ sessionId, socket, isOpen, onClose }: FileBrowserP
       {/* Desktop: Split view | Mobile: Single view */}
       <div className="flex flex-1 min-h-0" style={{ height: '60vh' }}>
         {/* File tree - always visible on desktop, conditionally on mobile */}
-        <div className={`w-full md:w-1/3 md:min-w-[200px] md:max-w-[300px] border-r border-gray-700 bg-gray-900 overflow-y-auto ${mobileShowPreview ? 'hidden md:block' : ''}`}>
-          <FileTree
-            key={treeKey}
-            sessionId={sessionId}
-            socket={socket}
-            onFileSelect={handleFileSelect}
-            selectedPath={selectedPath}
-            showHidden={true}
-          />
+        <div className={`w-full md:w-1/3 md:min-w-[200px] md:max-w-[300px] border-r border-gray-200 bg-gray-50 overflow-y-auto dark:border-gray-700 dark:bg-gray-900 ${mobileShowPreview ? 'hidden md:block' : ''}`}>
+          {props.mode === 'socket' ? (
+            <FileTree
+              key={treeKey}
+              mode="socket"
+              sessionId={props.sessionId}
+              socket={props.socket}
+              onFileSelect={handleFileSelect}
+              selectedPath={selectedPath}
+              showHidden={true}
+            />
+          ) : (
+            <FileTree
+              key={treeKey}
+              mode="api"
+              workingDir={props.workingDir}
+              onFileSelect={handleFileSelect}
+              selectedPath={selectedPath}
+              showHidden={true}
+            />
+          )}
         </div>
 
         {/* File preview - always visible on desktop, conditionally on mobile */}
-        <div className={`flex-1 flex-col min-h-0 min-w-0 bg-gray-900 ${mobileShowPreview ? 'flex' : 'hidden md:flex'}`}>
-          <FilePreview
-            sessionId={sessionId}
-            socket={socket}
-            path={selectedPath}
-            isImage={isImage}
-          />
+        <div className={`flex-1 flex-col min-h-0 min-w-0 bg-gray-50 dark:bg-gray-900 ${mobileShowPreview ? 'flex' : 'hidden md:flex'}`}>
+          {props.mode === 'socket' ? (
+            <FilePreview
+              mode="socket"
+              sessionId={props.sessionId}
+              socket={props.socket}
+              path={selectedPath}
+              isImage={isImage}
+            />
+          ) : (
+            <FilePreview
+              mode="api"
+              workingDir={props.workingDir}
+              path={selectedPath}
+              isImage={isImage}
+            />
+          )}
         </div>
       </div>
     </ModalPanel>

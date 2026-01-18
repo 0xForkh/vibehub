@@ -459,6 +459,7 @@ export function ClaudePaneView({
           })()}
         />
         <FileBrowser
+          mode="socket"
           sessionId={sessionId}
           socket={socket}
           isOpen={showFileBrowser}
