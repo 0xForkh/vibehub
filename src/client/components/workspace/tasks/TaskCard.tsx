@@ -411,16 +411,26 @@ export function TaskCard({
     >
       {/* Header row: title + status chip + session indicator + actions */}
       <div className="flex items-start gap-2">
-        <div className="flex-1 min-w-0 cursor-text" onClick={onEditStart}>
-          <div className="flex items-center gap-2">
-            <span className="text-base font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 truncate">
+        <div
+          className="flex-1 min-w-0 cursor-pointer"
+          onClick={() => {
+            // For tasks in progress or review, open preview instead of edit
+            if ((status === 'doing' || status === 'review') && hasValidSession && onPreviewSession) {
+              onPreviewSession(task.sessionId!);
+            } else {
+              onEditStart();
+            }
+          }}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-base font-medium text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400">
               {task.title}
             </span>
             <StatusBadge status={status} />
             {sessionStatus && <SessionStatusIndicator sessionStatus={sessionStatus} />}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex shrink-0 items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
           {hasValidSession && onPreviewSession && (
             <Button
               variant="ghost"
@@ -505,15 +515,30 @@ export function TaskCard({
       {/* Description on its own row */}
       {task.description && (
         <div
-          className="mt-2 text-sm text-gray-500 dark:text-gray-400 whitespace-pre-wrap cursor-text hover:text-gray-700 dark:hover:text-gray-300"
-          onClick={onEditStart}
+          className="mt-2 text-sm text-gray-500 dark:text-gray-400 whitespace-pre-wrap cursor-pointer hover:text-gray-700 dark:hover:text-gray-300"
+          onClick={() => {
+            if ((status === 'doing' || status === 'review') && hasValidSession && onPreviewSession) {
+              onPreviewSession(task.sessionId!);
+            } else {
+              onEditStart();
+            }
+          }}
         >
           {task.description}
         </div>
       )}
       {/* Attachments display */}
       {task.attachments && task.attachments.length > 0 && (
-        <div onClick={onEditStart} className="cursor-text">
+        <div
+          className="cursor-pointer"
+          onClick={() => {
+            if ((status === 'doing' || status === 'review') && hasValidSession && onPreviewSession) {
+              onPreviewSession(task.sessionId!);
+            } else {
+              onEditStart();
+            }
+          }}
+        >
           <AttachmentDisplay attachments={displayAttachments} compact />
         </div>
       )}
