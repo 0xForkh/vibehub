@@ -2,6 +2,9 @@ import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Cloc
 import { useState, useEffect, useCallback } from 'react';
 import { DiffView, DiffModeEnum } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 import { Button } from '../ui/button';
 import { ModalPanel } from '../ui/ModalPanel';
 
@@ -610,10 +613,12 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             <div className="flex-1 min-h-0 overflow-auto">
               {commitMessages.length > 0 ? (
                 <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
-                  <div className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap space-y-3">
+                  <div className="space-y-3">
                     {commitMessages.map((msg, i) => (
-                      <div key={i} className={i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}>
-                        {msg}
+                      <div key={i} className={`prose prose-sm dark:prose-invert max-w-none ${i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}`}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                          {msg}
+                        </ReactMarkdown>
                       </div>
                     ))}
                   </div>
