@@ -9,6 +9,7 @@ import { FileBrowser } from '../claude/FileBrowser';
 import { GitPanel } from '../claude/GitPanel';
 import { StartSessionDialog } from './StartSessionDialog';
 import { SessionPreviewDrawer } from './SessionPreviewDrawer';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import type { SessionManagerResult } from '../../types/sessionState';
 
 interface TaskListViewProps {
@@ -16,7 +17,7 @@ interface TaskListViewProps {
   projectName: string;
   validSessionIds?: Set<string>;
   sessionManager?: SessionManagerResult;
-  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[], worktree?: { branch: string }) => void;
+  onCreateSession?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: TaskAttachment[], worktree?: { branch: string }) => Promise<string | undefined>;
   onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
 }
@@ -43,6 +44,8 @@ export function TaskListView({
   const [showGitPanel, setShowGitPanel] = useState(false);
   const [startSessionTask, setStartSessionTask] = useState<Task | null>(null);
   const [previewSessionId, setPreviewSessionId] = useState<string | null>(null);
+  const [mobileTab, setMobileTab] = useState<'todo' | 'review'>('todo');
+  const isMobile = useIsMobile();
 
   // Subscribe to the preview session when it changes
   useEffect(() => {
@@ -95,7 +98,7 @@ export function TaskListView({
     setStartSessionTask(task);
   };
 
-  const handleStartSessionConfirm = (
+  const handleStartSessionConfirm = async (
     name: string,
     workingDir: string,
     initialPrompt?: string,
@@ -103,8 +106,12 @@ export function TaskListView({
     attachments?: TaskAttachment[],
     worktree?: { branch: string }
   ) => {
-    onCreateSession?.(name, workingDir, initialPrompt, taskId, attachments, worktree);
+    const sessionId = await onCreateSession?.(name, workingDir, initialPrompt, taskId, attachments, worktree);
     setStartSessionTask(null);
+    // Open the session preview drawer instead of navigating to the session tab
+    if (sessionId) {
+      setPreviewSessionId(sessionId);
+    }
   };
 
   // Split tasks: left = pending + doing, right = review
@@ -162,41 +169,95 @@ export function TaskListView({
 
   return (
     <div className="flex h-full flex-col bg-gray-100 dark:bg-gray-900">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-800">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+      {/* Header - merged with tabs on mobile */}
+      {isMobile ? (
+        <div className="flex items-center border-b border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
+          <button
+            onClick={() => setMobileTab('todo')}
+            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+              mobileTab === 'todo'
+                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            Todo
+            <span className="ml-1 text-xs">({leftTasks.length})</span>
+          </button>
+          <button
+            onClick={() => setMobileTab('review')}
+            className={`flex-1 px-3 py-2 text-sm font-medium transition-colors ${
+              mobileTab === 'review'
+                ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            Review
+            <span className="ml-1 text-xs">({rightTasks.length})</span>
+          </button>
+          <div className="flex shrink-0 items-center px-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsAdding(true)}
+              className="h-7 w-7 p-0"
+              title="Add task"
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowFileBrowser(true)}
+              className="h-7 w-7 p-0"
+              title="Browse files"
+            >
+              <FolderOpen className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowGitPanel(true)}
+              className="h-7 w-7 p-0"
+              title="Git status"
+            >
+              <GitCommitHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 border-b border-gray-200 bg-white px-3 py-1.5 dark:border-gray-700 dark:bg-gray-800">
+          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white">
             {projectName}
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{projectPath}</p>
+          <div className="flex shrink-0 items-center">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowFileBrowser(true)}
+              className="h-7 w-7 p-0"
+              title="Browse files"
+            >
+              <FolderOpen className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowGitPanel(true)}
+              className="h-7 w-7 p-0"
+              title="Git status"
+            >
+              <GitCommitHorizontal className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowFileBrowser(true)}
-            className="h-8 w-8 p-0"
-            title="Browse files"
-          >
-            <FolderOpen className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowGitPanel(true)}
-            className="h-8 w-8 p-0"
-            title="Git status"
-          >
-            <GitCommitHorizontal className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      )}
 
-      {/* Two-column layout */}
-      <div className="flex flex-1 gap-4 overflow-hidden p-4">
+      {/* Mobile: Single column with tabs / Desktop: Two columns side by side */}
+      <div className="flex flex-1 flex-col gap-4 overflow-hidden p-2 md:flex-row md:p-4">
         {/* Left column: Todo / In Progress */}
-        <div className="flex flex-1 flex-col overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800">
-          <div className="flex items-center justify-between px-3 py-2">
+        <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800 ${isMobile && mobileTab !== 'todo' ? 'hidden' : ''}`}>
+          {/* Desktop header */}
+          <div className="hidden items-center justify-between px-3 py-2 md:flex">
             <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">
               Todo / In Progress
               <span className="ml-2 text-xs text-gray-500">({leftTasks.length})</span>
@@ -231,8 +292,9 @@ export function TaskListView({
         </div>
 
         {/* Right column: To Review */}
-        <div className="flex flex-1 flex-col overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800">
-          <div className="flex items-center justify-between px-3 py-2">
+        <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800 ${isMobile && mobileTab !== 'review' ? 'hidden' : ''}`}>
+          {/* Desktop header */}
+          <div className="hidden items-center justify-between px-3 py-2 md:flex">
             <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">
               To Review
               <span className="ml-2 text-xs text-gray-500">({rightTasks.length})</span>
