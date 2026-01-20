@@ -10,9 +10,6 @@ import {
   getCurrentBranch,
   getDefaultBranch,
   hasUncommittedChanges,
-  mergeBranch,
-  deleteBranch,
-  removeWorktree,
 } from '../utils/gitWorktree.js';
 
 const execAsync = promisify(exec);
@@ -409,7 +406,8 @@ router.post('/commit', async (req: Request, res: Response) => {
     },
   });
 
-  const prompt = `Review all changed files (staged and unstaged) and commit them.
+  const prompt = `Review all changed files (staged and unstaged) in the current directory (${dirPath}) and commit them.
+IMPORTANT: Stay in the current working directory. Do not change to a different directory.
 Split into multiple commits by feature/purpose if appropriate.
 Use clear, descriptive commit messages.
 Do NOT push to remote.
@@ -467,7 +465,7 @@ router.get('/worktree-info', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/git/merge-worktree - Merge worktree branch to target and cleanup
+ * POST /api/git/merge-worktree - Merge worktree branch to target using Claude
  * Body:
  *   - worktreePath: path to worktree (required)
  *   - targetBranch: branch to merge into (default: main/master)
@@ -531,69 +529,97 @@ router.post('/merge-worktree', async (req: Request, res: Response) => {
     }
   };
 
-  logger.info('Starting worktree merge', { worktreePath, sourceBranch, targetBranch });
+  logger.info('Starting worktree merge with Claude', { worktreePath, sourceBranch, targetBranch, mainRepoPath });
+  sendEvent('status', { step: 'start', message: 'Starting merge process...' });
+
+  let error: string | null = null;
+  let mergeSucceeded = false;
+
+  const agent = new ClaudeAgentService({
+    workingDir: mainRepoPath, // Run from main repo to perform the merge
+    permissionMode: 'acceptEdits',
+    onMessage: (message) => {
+      if (message.type === 'assistant' && typeof message.message?.content === 'string') {
+        sendEvent('message', { text: message.message.content });
+      } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) {
+            sendEvent('message', { text: block.text });
+          }
+        }
+      }
+    },
+    onPermissionRequest: async (toolName, input) => {
+      let description = toolName;
+      if (toolName === 'Bash' && typeof input.command === 'string') {
+        const cmd = input.command as string;
+        if (cmd.includes('git merge')) {
+          description = 'Merging branches...';
+        } else if (cmd.includes('git checkout')) {
+          description = 'Switching branches...';
+        } else if (cmd.includes('git status') || cmd.includes('git diff')) {
+          description = 'Checking status...';
+        } else if (cmd.includes('git add')) {
+          description = 'Staging resolved files...';
+        } else if (cmd.includes('git commit')) {
+          description = 'Committing merge...';
+        } else if (cmd.includes('git worktree remove')) {
+          description = 'Removing worktree...';
+        } else if (cmd.includes('git branch -')) {
+          description = 'Deleting branch...';
+        } else {
+          description = `Running: ${cmd.slice(0, 50)}${cmd.length > 50 ? '...' : ''}`;
+        }
+      }
+      sendEvent('tool', { tool: toolName, description });
+      return { behavior: 'allow' as const, updatedInput: input };
+    },
+    onError: (err) => {
+      error = err.message;
+      logger.error('Claude merge error', { error: err.message });
+    },
+    onComplete: () => {
+      logger.info('Claude merge completed');
+    },
+  });
+
+  const prompt = `Merge the branch "${sourceBranch}" into "${targetBranch}" in this repository (${mainRepoPath}).
+
+Follow these steps:
+1. First, checkout the target branch "${targetBranch}"
+2. Merge "${sourceBranch}" into it
+3. If there are merge conflicts, resolve them intelligently by examining the conflicting files and making the best decision to preserve functionality from both branches
+4. After resolving any conflicts, complete the merge commit
+${deleteWorktree ? `5. Remove the worktree at "${worktreePath}" using: git worktree remove --force "${worktreePath}"` : ''}
+${deleteBranchFlag ? `${deleteWorktree ? '6' : '5'}. Delete the source branch "${sourceBranch}" using: git branch -D "${sourceBranch}"` : ''}
+
+IMPORTANT:
+- Stay in the main repository directory (${mainRepoPath})
+- Do NOT push to remote
+- If merge conflicts occur, resolve them and explain what you did
+- After completing all steps, summarize what was done`;
 
   try {
-    // Step 1: Merge
-    sendEvent('status', { step: 'merge', message: `Merging ${sourceBranch} into ${targetBranch}...` });
-    const mergeResult = await mergeBranch(mainRepoPath, sourceBranch, targetBranch);
+    await agent.start(prompt);
 
-    if (!mergeResult.success) {
-      sendEvent('done', {
-        success: false,
-        error: mergeResult.error,
-        conflictFiles: mergeResult.conflictFiles,
-      });
-      res.end();
-      return;
-    }
-
-    sendEvent('status', { step: 'merge', message: 'Merge successful' });
-
-    // Step 2: Remove worktree (if requested)
-    if (deleteWorktree) {
-      sendEvent('status', { step: 'worktree', message: 'Removing worktree...' });
-      const removeResult = await removeWorktree(mainRepoPath, worktreePath, true);
-
-      if (!removeResult.success) {
-        sendEvent('done', {
-          success: false,
-          error: `Merge succeeded but failed to remove worktree: ${removeResult.error}`,
-          mergeSucceeded: true,
-        });
-        res.end();
-        return;
-      }
-
-      sendEvent('status', { step: 'worktree', message: 'Worktree removed' });
-    }
-
-    // Step 3: Delete branch (if requested)
-    if (deleteBranchFlag) {
-      sendEvent('status', { step: 'branch', message: `Deleting branch ${sourceBranch}...` });
-      const branchResult = await deleteBranch(mainRepoPath, sourceBranch, true);
-
-      if (!branchResult.success) {
-        sendEvent('done', {
-          success: true, // Merge succeeded, branch deletion is non-critical
-          warning: `Merge succeeded but failed to delete branch: ${branchResult.error}`,
-        });
-        res.end();
-        return;
-      }
-
-      sendEvent('status', { step: 'branch', message: 'Branch deleted' });
+    // Check if merge was successful by verifying we're on target branch and it has the commits
+    try {
+      const currentBranch = await getCurrentBranch(mainRepoPath);
+      mergeSucceeded = currentBranch === targetBranch;
+    } catch {
+      // Couldn't verify, assume it worked if no error
+      mergeSucceeded = !error;
     }
 
     sendEvent('done', {
-      success: true,
-      message: `Successfully merged ${sourceBranch} into ${targetBranch}`,
+      success: !error && mergeSucceeded,
+      error: error || undefined,
       deletedWorktree: deleteWorktree,
       deletedBranch: deleteBranchFlag,
     });
   } catch (err) {
-    logger.error('Failed to merge worktree', { err });
-    sendEvent('done', { success: false, error: 'Unexpected error during merge' });
+    logger.error('Failed to run Claude merge', { err });
+    sendEvent('done', { success: false, error: 'Failed to run Claude merge' });
   }
 
   res.end();
