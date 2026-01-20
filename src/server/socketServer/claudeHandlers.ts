@@ -168,11 +168,23 @@ export function registerClaudeHandlers(io: Server): void {
       attachments?: FileAttachment[];
     }) => {
       try {
-        logger.debug('Sending message to Claude', {
+        logger.info('claude:message received', {
           sessionId,
-          content: (content || '').slice(0, 50),
+          contentLength: content?.length || 0,
+          contentPreview: (content || '').slice(0, 50),
           attachmentCount: attachments?.length || 0,
+          attachmentNames: attachments?.map(a => a.name) || [],
+          attachmentSizes: attachments?.map(a => a.size) || [],
+          hasAttachmentData: attachments?.map(a => !!a.data && a.data.length > 0) || [],
         });
+
+        // Check if session is active in ClaudeManager
+        // If not, queue the message - it will be processed when session starts
+        if (!claudeManager.isSessionActive(sessionId)) {
+          logger.info('Session not yet active, queuing message', { sessionId });
+          await sessionStore.queueMessage(sessionId, content);
+          return;
+        }
 
         // Get session to find working directory
         const session = await sessionStore.getSession(sessionId);

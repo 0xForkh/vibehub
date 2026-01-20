@@ -166,6 +166,12 @@ export class ClaudeSessionManager {
         });
       }
 
+      // Emit current thinking state so client knows if Claude is still processing
+      this.io.to(socketId).emit('claude:thinking', {
+        sessionId,
+        thinking: existingSession.thinking,
+      });
+
       return;
     }
 

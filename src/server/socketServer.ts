@@ -100,6 +100,7 @@ export async function server(
     path: '/socket.io',
     pingInterval: 25000,
     pingTimeout: 20000,
+    maxHttpBufferSize: 10e6, // 10MB - allows large file attachments (base64 encoded)
   });
 
   await new Promise<void>((resolve) => {
