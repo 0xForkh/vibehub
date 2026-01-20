@@ -474,6 +474,14 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
 
       return {
         sendMessage: (content: string, attachments?: FileAttachmentData[]) => {
+          console.log('[useSessionManager] sendMessage called', {
+            sessionId,
+            contentLength: content?.length || 0,
+            attachmentCount: attachments?.length || 0,
+            attachmentNames: attachments?.map(a => a.name),
+            attachmentSizes: attachments?.map(a => a.size),
+            hasAttachmentData: attachments?.map(a => !!a.data && a.data.length > 0),
+          });
           // Add user message to state immediately
           const messageContent: ClaudeMessage['content'] =
             attachments && attachments.length > 0

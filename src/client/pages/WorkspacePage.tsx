@@ -81,7 +81,8 @@ export function WorkspacePage() {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
 
   // Track pending initial prompts for sessions created from kanban tasks
-  const [pendingInitialPrompts, setPendingInitialPrompts] = useState<Map<string, { prompt: string; attachments?: { name: string; type: string; size: number; data: string }[] }>>(new Map());
+  // `sent` tracks whether we've attempted to send - we only remove from pending when server confirms (thinking=true)
+  const [pendingInitialPrompts, setPendingInitialPrompts] = useState<Map<string, { prompt: string; attachments?: { name: string; type: string; size: number; data: string }[]; sent?: boolean }>>(new Map());
 
   // Kanban tabs state
   const [kanbanTabs, setKanbanTabs] = useState<Map<string, KanbanTab>>(() => loadKanbanTabs());
@@ -165,25 +166,72 @@ export function WorkspacePage() {
   }, [sessions, pendingSessionId]);
 
   // Send pending initial prompts when session becomes connected
+  // Build a dependency string that changes when connection or thinking state changes for pending sessions
+  const pendingSessionsStateKey = useMemo(() => {
+    return Array.from(pendingInitialPrompts.keys())
+      .map(id => {
+        const state = sessionManager.sessionStates.get(id);
+        return `${id}:${state?.isConnected ? 'c' : 'd'}:${state?.thinking ? 't' : 'i'}`;
+      })
+      .sort()
+      .join(',');
+  }, [pendingInitialPrompts, sessionManager.sessionStates]);
+
   useEffect(() => {
     if (pendingInitialPrompts.size === 0) return;
 
-    pendingInitialPrompts.forEach(({ prompt, attachments }, sessionId) => {
+    pendingInitialPrompts.forEach(({ prompt, attachments, sent }, sessionId) => {
       const sessionState = sessionManager.sessionStates.get(sessionId);
-      // Only send when session is connected
-      if (sessionState?.isConnected) {
+
+      // If server is thinking, message was received - remove from pending
+      if (sessionState?.thinking) {
+        setPendingInitialPrompts(prev => {
+          const next = new Map(prev);
+          next.delete(sessionId);
+          return next;
+        });
+        return;
+      }
+
+      // Only send when session is connected and we haven't sent yet (or need to resend after reconnect)
+      // We resend if: not sent yet, OR was sent but session disconnected and reconnected (isConnected true but not thinking)
+      if (sessionState?.isConnected && !sent) {
         const actions = sessionManager.getSessionActions(sessionId);
         if (actions) {
+          console.log('[WorkspacePage] Sending pending initial prompt', {
+            sessionId,
+            promptLength: prompt?.length || 0,
+            attachmentCount: attachments?.length || 0,
+            attachmentNames: attachments?.map(a => a.name),
+            attachmentSizes: attachments?.map(a => a.size),
+            hasAttachmentData: attachments?.map(a => !!a.data && a.data.length > 0),
+          });
           actions.sendMessage(prompt, attachments);
+          // Mark as sent but don't remove - we'll remove when thinking becomes true
           setPendingInitialPrompts(prev => {
             const next = new Map(prev);
-            next.delete(sessionId);
+            const existing = next.get(sessionId);
+            if (existing) {
+              next.set(sessionId, { ...existing, sent: true });
+            }
             return next;
           });
         }
       }
+
+      // If we sent the message but connection dropped (isConnected false), reset sent flag to resend on reconnect
+      if (sent && !sessionState?.isConnected) {
+        setPendingInitialPrompts(prev => {
+          const next = new Map(prev);
+          const existing = next.get(sessionId);
+          if (existing) {
+            next.set(sessionId, { ...existing, sent: false });
+          }
+          return next;
+        });
+      }
     });
-  }, [pendingInitialPrompts, sessionManager.sessionStates, sessionManager.getSessionActions]);
+  }, [pendingInitialPrompts, pendingSessionsStateKey, sessionManager.getSessionActions, sessionManager.sessionStates]);
 
   // Sync URL with state
   useEffect(() => {
@@ -400,12 +448,14 @@ export function WorkspacePage() {
     taskId?: string,
     attachments?: { name: string; type: string; size: number; data: string }[],
     worktree?: { branch: string }
-  ) => {
+  ): Promise<string | undefined> => {
     try {
       // Sessions created from tasks default to acceptEdits mode
       const session = await createClaudeSession(name, workingDir, 'acceptEdits', worktree);
       if (session) {
-        handleSelectSession(session.id);
+        // Subscribe immediately before setting pending prompt to avoid race condition
+        // (the effect-based subscription may not run in time on slower devices)
+        sessionManager.subscribeToSession(session.id);
         // Store the initial prompt to be sent when the session is ready
         const formattedPrompt = initialPrompt
           ? `# Task: ${name}
@@ -431,11 +481,13 @@ When you have completed this task, use the \`mcp__kanban-tools__update_task_stat
             console.error('Failed to link task to session:', err);
           }
         }
+        return session.id;
       }
     } catch (err) {
       console.error('Failed to create session from task:', err);
     }
-  }, [createClaudeSession, handleSelectSession]);
+    return undefined;
+  }, [createClaudeSession, sessionManager]);
 
   const sidebarContent = (
     <SessionSidebar
