@@ -1,9 +1,15 @@
-import { Square, Paperclip, X, FileText, Image as ImageIcon, File, Loader2 } from 'lucide-react';
+import { Square, Paperclip, X, FileText, Image as ImageIcon, File, Loader2, MessageCircle } from 'lucide-react';
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { Socket } from 'socket.io-client';
 import type { FileAttachment } from '../../types/claude';
 import { DictationButton } from './DictationButton';
-import { useFileMention, parseFileMentions } from '../../hooks/useFileMention';
+import { useMention, parseMentions, type MentionItem } from '../../hooks/useMention';
+
+interface SessionInfo {
+  id: string;
+  name: string;
+  type: string;
+}
 
 interface ClaudeInputBarProps {
   onSendMessage: (message: string, attachments?: FileAttachment[]) => void;
@@ -14,6 +20,7 @@ interface ClaudeInputBarProps {
   slashCommands?: string[];
   socket?: Socket | null;
   workingDir?: string;
+  sessions?: SessionInfo[];
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -37,6 +44,7 @@ export function ClaudeInputBar({
   slashCommands = [],
   socket = null,
   workingDir,
+  sessions = [],
 }: ClaudeInputBarProps) {
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
@@ -48,12 +56,13 @@ export function ClaudeInputBar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const slashMenuRef = useRef<HTMLDivElement>(null);
-  const fileMentionMenuRef = useRef<HTMLDivElement>(null);
+  const mentionMenuRef = useRef<HTMLDivElement>(null);
 
-  // File mention hook
-  const fileMention = useFileMention({
+  // Mention hook (files + sessions)
+  const mention = useMention({
     workingDir,
-    enabled: !disabled && !!workingDir,
+    sessions,
+    enabled: !disabled,
   });
 
   // Filter slash commands based on current input
@@ -82,18 +91,18 @@ export function ClaudeInputBar({
         setShowSlashMenu(false);
       }
       if (
-        fileMentionMenuRef.current &&
-        !fileMentionMenuRef.current.contains(target) &&
+        mentionMenuRef.current &&
+        !mentionMenuRef.current.contains(target) &&
         textareaRef.current &&
         !textareaRef.current.contains(target)
       ) {
-        fileMention.closeMenu();
+        mention.closeMenu();
       }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [fileMention]);
+  }, [mention]);
 
   // Reset selected index when filter changes
   useEffect(() => {
@@ -256,30 +265,30 @@ export function ClaudeInputBar({
     if (slashMatch && slashCommands.length > 0) {
       setSlashFilter(slashMatch[1]);
       setShowSlashMenu(true);
-      fileMention.closeMenu();
+      mention.closeMenu();
     } else {
       setShowSlashMenu(false);
       setSlashFilter('');
-      // Handle file mention
-      fileMention.handleInputChange(value, cursorPosition);
+      // Handle mention (files + sessions)
+      mention.handleInputChange(value, cursorPosition);
     }
-  }, [slashCommands, fileMention]);
+  }, [slashCommands, mention]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if ((message.trim() || attachments.length > 0) && !disabled) {
-      // Parse file mentions to convert @[name](path) to full path
-      const processedMessage = parseFileMentions(message.trim());
+      // Parse mentions to convert @[name](type:value) to appropriate format
+      const processedMessage = parseMentions(message.trim());
       onSendMessage(processedMessage, attachments.length > 0 ? attachments : undefined);
       setMessage('');
       setAttachments([]);
-      fileMention.resetState();
+      mention.resetState();
     }
   };
 
-  // Handle file mention selection
-  const selectFileMention = useCallback((file: { name: string; path: string }) => {
-    const { newValue, newCursorPosition } = fileMention.selectSuggestion(file);
+  // Handle mention selection (files or sessions)
+  const selectMention = useCallback((item: MentionItem) => {
+    const { newValue, newCursorPosition } = mention.selectSuggestion(item);
     setMessage(newValue);
     // Set cursor position after React updates
     setTimeout(() => {
@@ -289,7 +298,7 @@ export function ClaudeInputBar({
         textareaRef.current.focus();
       }
     }, 0);
-  }, [fileMention]);
+  }, [mention]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Handle ESC to abort or close menus
@@ -299,9 +308,9 @@ export function ClaudeInputBar({
         setShowSlashMenu(false);
         return;
       }
-      if (fileMention.showMenu) {
+      if (mention.showMenu) {
         e.preventDefault();
-        fileMention.closeMenu();
+        mention.closeMenu();
         return;
       }
       if (showAbort && onAbort) {
@@ -332,21 +341,21 @@ export function ClaudeInputBar({
       }
     }
 
-    // Handle file mention menu navigation
-    if (fileMention.showMenu && fileMention.suggestions.length > 0) {
+    // Handle mention menu navigation (files + sessions)
+    if (mention.showMenu && mention.suggestions.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        fileMention.navigateDown();
+        mention.navigateDown();
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        fileMention.navigateUp();
+        mention.navigateUp();
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault();
-        selectFileMention(fileMention.suggestions[fileMention.selectedIndex]);
+        selectMention(mention.suggestions[mention.selectedIndex]);
         return;
       }
     }
@@ -511,46 +520,57 @@ export function ClaudeInputBar({
               </div>
             )}
 
-            {/* File mention dropdown menu */}
-            {fileMention.showMenu && (
+            {/* Mention dropdown menu (files + sessions) */}
+            {mention.showMenu && (
               <div
-                ref={fileMentionMenuRef}
+                ref={mentionMenuRef}
                 className="absolute bottom-full left-0 mb-2 max-h-64 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
               >
-                {fileMention.loading && (
+                {mention.loading && (
                   <div className="flex items-center gap-2 px-4 py-2 text-sm text-gray-500">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span>Searching...</span>
                   </div>
                 )}
-                {!fileMention.loading && fileMention.suggestions.length === 0 && fileMention.searchQuery.length >= 2 && (
+                {!mention.loading && mention.suggestions.length === 0 && mention.searchQuery.length >= 2 && (
                   <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-                    No files found matching "{fileMention.searchQuery}"
+                    No files or sessions found matching &quot;{mention.searchQuery}&quot;
                   </div>
                 )}
-                {!fileMention.loading && fileMention.searchQuery.length < 2 && (
+                {!mention.loading && mention.searchQuery.length < 2 && mention.suggestions.length === 0 && (
                   <div className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
-                    Type at least 2 characters to search...
+                    Type to search files or sessions...
                   </div>
                 )}
-                {fileMention.suggestions.map((file, idx) => (
+                {mention.suggestions.map((item, idx) => (
                   <button
-                    key={file.path}
+                    key={`${item.type}-${item.value}`}
                     type="button"
-                    onClick={() => selectFileMention(file)}
+                    onClick={() => selectMention(item)}
                     className={`flex w-full items-center gap-2 px-4 py-2 text-left text-sm ${
-                      idx === fileMention.selectedIndex
+                      idx === mention.selectedIndex
                         ? 'bg-blue-100 text-blue-900 dark:bg-blue-900 dark:text-blue-100'
                         : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'
                     }`}
                   >
-                    <File className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                    {item.type === 'session' ? (
+                      <MessageCircle className="h-4 w-4 flex-shrink-0 text-purple-500" />
+                    ) : (
+                      <File className="h-4 w-4 flex-shrink-0 text-gray-400" />
+                    )}
                     <div className="min-w-0 flex-1">
-                      <span className="font-medium">{file.name}</span>
-                      <span className="ml-2 truncate text-xs text-gray-500 dark:text-gray-400">
-                        {file.path}
-                      </span>
+                      <span className="font-medium">{item.name}</span>
+                      {item.description && (
+                        <span className="ml-2 truncate text-xs text-gray-500 dark:text-gray-400">
+                          {item.description}
+                        </span>
+                      )}
                     </div>
+                    {item.type === 'session' && (
+                      <span className="rounded bg-purple-100 px-1.5 py-0.5 text-xs text-purple-700 dark:bg-purple-900 dark:text-purple-300">
+                        session
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>

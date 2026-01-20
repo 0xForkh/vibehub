@@ -14,7 +14,7 @@ interface SessionPanelProps {
   onCloseTab: (tabId: string) => void;
   onDelete?: (sessionId: string, cleanupWorktree: boolean) => void;
   onFork?: (newSessionId: string) => void;
-  onCreateSessionFromTask?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: { name: string; type: string; size: number; data: string }[], worktree?: { branch: string }) => void;
+  onCreateSessionFromTask?: (name: string, workingDir: string, initialPrompt?: string, taskId?: string, attachments?: { name: string; type: string; size: number; data: string }[], worktree?: { branch: string }) => Promise<string | undefined>;
   onOpenSession?: (sessionId: string) => void;
   onDeleteSession?: (sessionId: string) => void;
   sessionManager: SessionManagerResult;
@@ -121,6 +121,7 @@ export function SessionPanel({
               onFork={onFork}
               showHeader={true}
               className="h-full"
+              sessions={sessions}
             />
           </div>
         );

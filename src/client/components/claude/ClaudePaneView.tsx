@@ -13,6 +13,12 @@ import type { SessionState, SessionActions, PermissionMode } from '../../types/s
 import type { FileAttachment } from '../../types/claude';
 import type { Socket } from 'socket.io-client';
 
+interface SessionInfo {
+  id: string;
+  name: string;
+  type: string;
+}
+
 interface ClaudePaneViewProps {
   sessionId: string;
   sessionName?: string;
@@ -26,6 +32,7 @@ interface ClaudePaneViewProps {
   onFork?: (newSessionId: string) => void;
   showHeader?: boolean;
   className?: string;
+  sessions?: SessionInfo[];
 }
 
 export function ClaudePaneView({
@@ -41,6 +48,7 @@ export function ClaudePaneView({
   onFork,
   showHeader = true,
   className = '',
+  sessions = [],
 }: ClaudePaneViewProps) {
   const [isTodoExpanded, setIsTodoExpanded] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
@@ -448,10 +456,11 @@ export function ClaudePaneView({
           onSendMessage={handleSendMessage}
           onAbort={handleAbort}
           disabled={!isConnected}
-          showAbort={thinking}
+          showAbort={thinking && !pendingRequest}
           slashCommands={slashCommands}
           socket={socket}
           workingDir={workingDir}
+          sessions={sessions}
           placeholder={(() => {
             if (!isConnected) return 'Connecting...';
             if (pendingRequest) return 'Type to deny with message, or use buttons above...';
