@@ -201,9 +201,9 @@ export function registerClaudeHandlers(io: Server): void {
           // Ensure uploads directory exists
           await mkdir(uploadsDir, { recursive: true });
 
-          const savedFiles: { name: string; path: string; url: string; isImage: boolean }[] = [];
+          const savedFiles: { name: string; path: string; url: string; isImage: boolean; index: number }[] = [];
 
-          for (const attachment of attachments) {
+          for (const [i, attachment] of attachments.entries()) {
             // Generate unique filename with timestamp
             const timestamp = Date.now();
             const randomSuffix = Math.random().toString(36).slice(2, 8);
@@ -219,7 +219,7 @@ export function registerClaudeHandlers(io: Server): void {
             const fileUrl = `/api/uploads/${sessionId}/${uniqueName}`;
             const isImage = attachment.type.startsWith('image/');
 
-            savedFiles.push({ name: attachment.name, path: filePath, url: fileUrl, isImage });
+            savedFiles.push({ name: attachment.name, path: filePath, url: fileUrl, isImage, index: i });
             logger.debug('Saved uploaded file', {
               sessionId,
               originalName: attachment.name,
@@ -243,6 +243,7 @@ export function registerClaudeHandlers(io: Server): void {
                 name: f.name,
                 url: f.url,
                 isImage: f.isImage,
+                index: f.index,
               })),
             });
           }

@@ -353,7 +353,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
       files,
     }: {
       sessionId: string;
-      files: { name: string; url: string; isImage: boolean }[];
+      files: { name: string; url: string; isImage: boolean; index: number }[];
     }) => {
       updateSessionState(sessionId, (state) => {
         let lastUserMsgIndex = -1;
@@ -368,9 +368,13 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
         const lastUserMsg = state.messages[lastUserMsgIndex];
         if (typeof lastUserMsg.content === 'string') return state;
 
+        // Track which attachment index we're at (only count image/document blocks)
+        let attachmentIndex = 0;
         const updatedContent = lastUserMsg.content.map((block) => {
           if (block.type === 'image' || block.type === 'document') {
-            const matchingFile = files.find((f) => f.name === block.fileName);
+            // Match by index instead of name to handle duplicate filenames
+            const matchingFile = files.find((f) => f.index === attachmentIndex);
+            attachmentIndex += 1;
             if (matchingFile) {
               return { ...block, serverUrl: matchingFile.url, preview: matchingFile.url };
             }
