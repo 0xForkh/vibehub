@@ -1,4 +1,4 @@
-import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal, GitMerge, AlertTriangle } from 'lucide-react';
+import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal, GitMerge, AlertTriangle, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { DiffView, DiffModeEnum } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
@@ -112,6 +112,11 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
   const [mergeStatus, setMergeStatus] = useState<string>('');
   const [mergeResult, setMergeResult] = useState<{ success: boolean; error?: string; warning?: string; conflictFiles?: string[] } | null>(null);
   const [mergeOptions, setMergeOptions] = useState({ deleteWorktree: true, deleteBranch: true });
+
+  // Fetch/Pull/Push state
+  const [isFetching, setIsFetching] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
+  const [isPushing, setIsPushing] = useState(false);
 
   const fetchGitData = useCallback(async () => {
     if (!workingDir) return;
@@ -361,8 +366,87 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
     }
   }, [workingDir, isMerging, worktreeInfo, mergeOptions, onWorktreeMerged]);
 
+  const handleFetch = useCallback(async () => {
+    if (!workingDir || isFetching) return;
+
+    setIsFetching(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/git/fetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: workingDir }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to fetch');
+      }
+      // Refresh data after fetch
+      fetchGitData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch');
+    } finally {
+      setIsFetching(false);
+    }
+  }, [workingDir, isFetching, fetchGitData]);
+
+  const handlePull = useCallback(async () => {
+    if (!workingDir || isPulling) return;
+
+    setIsPulling(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/git/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: workingDir }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to pull');
+      }
+      // Refresh data after pull
+      fetchGitData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to pull');
+    } finally {
+      setIsPulling(false);
+    }
+  }, [workingDir, isPulling, fetchGitData]);
+
+  const handlePush = useCallback(async () => {
+    if (!workingDir || isPushing) return;
+
+    setIsPushing(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/git/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: workingDir, setUpstream: true }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to push');
+      }
+      // Refresh data after push
+      fetchGitData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to push');
+    } finally {
+      setIsPushing(false);
+    }
+  }, [workingDir, isPushing, fetchGitData]);
+
   const changeCount = status ? status.staged.length + status.unstaged.length : 0;
   const canMerge = worktreeInfo?.isWorktree && !worktreeInfo?.hasUncommittedChanges;
+  const isAnyOperationInProgress = isLoading || isCommitting || isMerging || isFetching || isPulling || isPushing;
 
   return (
     <ModalPanel
@@ -380,12 +464,45 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
       width="6xl"
       toolbar={
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleFetch}
+            disabled={isAnyOperationInProgress}
+            className="h-6 w-6 p-0"
+            title="Fetch from remote"
+          >
+            <ArrowDownToLine className={`h-3 w-3 ${isFetching ? 'animate-pulse' : ''}`} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handlePull}
+            disabled={isAnyOperationInProgress || changeCount > 0}
+            className="h-6 gap-1 px-2 text-xs"
+            title={changeCount > 0 ? 'Commit changes before pulling' : 'Pull from remote'}
+          >
+            <ArrowDownToLine className={`h-3 w-3 ${isPulling ? 'animate-pulse' : ''}`} />
+            {isPulling ? 'Pulling...' : 'Pull'}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handlePush}
+            disabled={isAnyOperationInProgress}
+            className="h-6 gap-1 px-2 text-xs"
+            title="Push to remote"
+          >
+            <ArrowUpFromLine className={`h-3 w-3 ${isPushing ? 'animate-pulse' : ''}`} />
+            {isPushing ? 'Pushing...' : 'Push'}
+          </Button>
+          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1" />
           {changeCount > 0 && (
             <Button
               variant="ghost"
               size="sm"
               onClick={handleCommit}
-              disabled={isLoading || isCommitting || isMerging}
+              disabled={isAnyOperationInProgress}
               className="h-6 gap-1 px-2 text-xs"
               title="Ask Claude to commit changes"
             >
@@ -399,7 +516,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
                 variant="ghost"
                 size="sm"
                 onClick={() => setShowMergeConfirm(true)}
-                disabled={isLoading || isCommitting || isMerging || !canMerge}
+                disabled={isAnyOperationInProgress || !canMerge}
                 className="h-6 gap-1 px-2 text-xs"
                 title={canMerge ? `Merge ${worktreeInfo.currentBranch} into ${worktreeInfo.defaultBranch}` : 'Commit changes before merging'}
               >
@@ -462,7 +579,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             variant="ghost"
             size="sm"
             onClick={() => { fetchGitData(); fetchWorktreeInfo(); }}
-            disabled={isLoading || isCommitting || isMerging}
+            disabled={isAnyOperationInProgress}
             className="h-6 w-6 p-0"
             title="Refresh"
           >

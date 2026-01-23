@@ -625,4 +625,104 @@ IMPORTANT:
   res.end();
 });
 
+/**
+ * POST /api/git/fetch - Fetch from remote
+ * Body:
+ *   - path: directory path (required)
+ *   - remote: remote name (default: origin)
+ */
+router.post('/fetch', async (req: Request, res: Response) => {
+  const { path: dirPath, remote = 'origin' } = req.body;
+
+  if (!dirPath) {
+    res.status(400).json({ error: 'Path is required' });
+    return;
+  }
+
+  if (!await isGitRepo(dirPath)) {
+    res.status(400).json({ error: 'Not a git repository' });
+    return;
+  }
+
+  try {
+    const { stdout, stderr } = await execAsync(`git fetch ${remote}`, { cwd: dirPath });
+    res.json({ success: true, output: stdout || stderr || 'Fetched successfully' });
+  } catch (err) {
+    logger.error('Failed to fetch', { err });
+    const message = err instanceof Error ? err.message : 'Failed to fetch';
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /api/git/pull - Pull from remote
+ * Body:
+ *   - path: directory path (required)
+ *   - remote: remote name (default: origin)
+ *   - branch: branch name (optional, uses current branch if not specified)
+ */
+router.post('/pull', async (req: Request, res: Response) => {
+  const { path: dirPath, remote = 'origin', branch } = req.body;
+
+  if (!dirPath) {
+    res.status(400).json({ error: 'Path is required' });
+    return;
+  }
+
+  if (!await isGitRepo(dirPath)) {
+    res.status(400).json({ error: 'Not a git repository' });
+    return;
+  }
+
+  // Check for uncommitted changes
+  const hasChanges = await hasUncommittedChanges(dirPath);
+  if (hasChanges) {
+    res.status(400).json({ error: 'You have uncommitted changes. Please commit or stash them first.' });
+    return;
+  }
+
+  try {
+    const branchArg = branch ? ` ${branch}` : '';
+    const { stdout, stderr } = await execAsync(`git pull ${remote}${branchArg}`, { cwd: dirPath });
+    res.json({ success: true, output: stdout || stderr || 'Pulled successfully' });
+  } catch (err) {
+    logger.error('Failed to pull', { err });
+    const message = err instanceof Error ? err.message : 'Failed to pull';
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /api/git/push - Push to remote
+ * Body:
+ *   - path: directory path (required)
+ *   - remote: remote name (default: origin)
+ *   - branch: branch name (optional, uses current branch if not specified)
+ *   - setUpstream: set upstream tracking (default: false)
+ */
+router.post('/push', async (req: Request, res: Response) => {
+  const { path: dirPath, remote = 'origin', branch, setUpstream = false } = req.body;
+
+  if (!dirPath) {
+    res.status(400).json({ error: 'Path is required' });
+    return;
+  }
+
+  if (!await isGitRepo(dirPath)) {
+    res.status(400).json({ error: 'Not a git repository' });
+    return;
+  }
+
+  try {
+    const currentBranch = branch || await getCurrentBranch(dirPath);
+    const upstreamFlag = setUpstream ? '-u ' : '';
+    const { stdout, stderr } = await execAsync(`git push ${upstreamFlag}${remote} ${currentBranch}`, { cwd: dirPath });
+    res.json({ success: true, output: stdout || stderr || 'Pushed successfully' });
+  } catch (err) {
+    logger.error('Failed to push', { err });
+    const message = err instanceof Error ? err.message : 'Failed to push';
+    res.status(500).json({ error: message });
+  }
+});
+
 export { router as gitRouter };
