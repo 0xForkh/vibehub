@@ -26,7 +26,8 @@ type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 interface ActiveClaudeSession {
   sessionId: string;
   service: ClaudeAgentService;
-  socketId: string;
+  // Using socket rooms instead of single socketId to support multiple users viewing the same session
+  // All emissions go to the room `claude:${sessionId}` instead of a single socket
   claudeSessionId?: string; // Set when Claude sends init message
   thinking: boolean; // Track if Claude is currently thinking/generating
   pendingPermissions: Map<string, PendingPermission>;
@@ -43,6 +44,9 @@ interface ActiveClaudeSession {
 
 /**
  * Manages active Claude Code sessions and their lifecycle using the Agent SDK
+ *
+ * Uses socket rooms for multi-user support: each session has a room `claude:${sessionId}`
+ * and all connected clients viewing that session join the room to receive broadcasts.
  */
 export class ClaudeSessionManager {
   private sessions = new Map<string, ActiveClaudeSession>();
@@ -52,6 +56,43 @@ export class ClaudeSessionManager {
   private globalAllowedTools: Set<string> = new Set(); // Cached global allowlist
 
   private globalToolsLoaded: Promise<void>;
+
+  /**
+   * Get the socket room name for a session
+   */
+  // eslint-disable-next-line class-methods-use-this
+  private getSessionRoom(sessionId: string): string {
+    return `claude:${sessionId}`;
+  }
+
+  /**
+   * Emit to all clients in a session's room
+   */
+  private emitToSession(sessionId: string, event: string, data: unknown): void {
+    this.io.to(this.getSessionRoom(sessionId)).emit(event, data);
+  }
+
+  /**
+   * Add a socket to a session's room
+   */
+  addSocketToSession(sessionId: string, socketId: string): void {
+    const socket = this.io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.join(this.getSessionRoom(sessionId));
+      this.logger.debug('Socket joined session room', { sessionId, socketId });
+    }
+  }
+
+  /**
+   * Remove a socket from a session's room
+   */
+  removeSocketFromSession(sessionId: string, socketId: string): void {
+    const socket = this.io.sockets.sockets.get(socketId);
+    if (socket) {
+      socket.leave(this.getSessionRoom(sessionId));
+      this.logger.debug('Socket left session room', { sessionId, socketId });
+    }
+  }
 
   constructor(io: SocketIOServer) {
     this.io = io;
@@ -88,20 +129,22 @@ export class ClaudeSessionManager {
     forkSession?: boolean,
     clientMessageCount?: number,
   ): Promise<void> {
-    // If session is already active, just reconnect the socket and replay history
+    // Add socket to session room for multi-user support
+    this.addSocketToSession(sessionId, socketId);
+
+    // If session is already active, just replay history for this new socket
     if (this.sessions.has(sessionId)) {
       const existingSession = this.sessions.get(sessionId);
       if (!existingSession) {
         throw new Error(`Session ${sessionId} not found in map`);
       }
-      this.logger.info('Reconnecting to existing Claude session', {
+      this.logger.info('Client joining existing Claude session', {
         sessionId,
-        oldSocketId: existingSession.socketId,
-        newSocketId: socketId,
+        socketId,
         clientMessageCount,
         serverMessageCount: existingSession.messageHistory.length,
       });
-      existingSession.socketId = socketId;
+      // Emit session ready directly to this socket (not the room, as other clients already know)
       this.io.to(socketId).emit('claude:session_ready', { sessionId, permissionMode: existingSession.permissionMode });
 
       // Only replay history if client has fewer messages than server
@@ -145,7 +188,7 @@ export class ClaudeSessionManager {
         });
       }
 
-      // Restore pending permission request if any
+      // Restore pending permission request if any (to this socket only)
       if (existingSession.pendingPermissions.size > 0) {
         for (const [toolUseId, pending] of existingSession.pendingPermissions.entries()) {
           this.io.to(socketId).emit('claude:permission_request', {
@@ -158,7 +201,7 @@ export class ClaudeSessionManager {
         }
       }
 
-      // Emit slash commands if available
+      // Emit slash commands if available (to this socket only)
       if (existingSession.slashCommands.length > 0) {
         this.io.to(socketId).emit('claude:slash_commands', {
           sessionId,
@@ -255,7 +298,6 @@ export class ClaudeSessionManager {
     const activeSession: ActiveClaudeSession = {
       sessionId,
       service,
-      socketId,
       thinking: false,
       pendingPermissions,
       messageHistory,
@@ -266,9 +308,10 @@ export class ClaudeSessionManager {
     };
 
     this.sessions.set(sessionId, activeSession);
+    // Emit directly to socket since it's already in the room and this is session init
     this.io.to(socketId).emit('claude:session_ready', { sessionId, permissionMode: effectivePermissionMode });
 
-    // Replay history to client if resuming
+    // Replay history to client if resuming (direct to this socket)
     if (messageHistory.length > 0) {
       for (const msg of messageHistory) {
         this.io.to(socketId).emit('claude:message', {
@@ -308,14 +351,13 @@ export class ClaudeSessionManager {
 
     this.logger.info('User message received', {
       sessionId,
-      socketId: session.socketId,
       contentPreview: content.slice(0, 100),
       contentLength: content.length,
     });
 
-    // Emit user message to client if requested (for programmatic messages like pending messages)
+    // Emit user message to all clients in the session room (for programmatic messages like pending messages)
     if (emitToClient) {
-      this.io.to(session.socketId).emit('claude:message', {
+      this.emitToSession(sessionId, 'claude:message', {
         sessionId,
         message: {
           type: 'user',
@@ -398,8 +440,8 @@ export class ClaudeSessionManager {
             pattern,
             globalAllowlistSize: this.globalAllowedTools.size,
           });
-          // Notify client of updated global allowlist
-          this.io.to(session.socketId).emit('claude:global_allowed_tools', {
+          // Notify all clients in session room of updated global allowlist
+          this.emitToSession(sessionId, 'claude:global_allowed_tools', {
             tools: Array.from(this.globalAllowedTools),
           });
         } else {
@@ -412,8 +454,8 @@ export class ClaudeSessionManager {
           });
           // Persist to database
           this.persistAllowedTools(sessionId, session.allowedTools);
-          // Notify client of updated allowlist
-          this.io.to(session.socketId).emit('claude:allowed_tools', {
+          // Notify all clients in session room of updated allowlist
+          this.emitToSession(sessionId, 'claude:allowed_tools', {
             sessionId,
             tools: Array.from(session.allowedTools),
           });
@@ -660,7 +702,6 @@ export class ClaudeSessionManager {
 
     this.logger.info('Permission request from SDK', {
       sessionId,
-      socketId: session.socketId,
       toolName,
       toolUseId,
       inputPreview: JSON.stringify(input).slice(0, 200),
@@ -677,8 +718,8 @@ export class ClaudeSessionManager {
         toolUseId,
       });
 
-      // Emit permission request to client
-      this.io.to(session.socketId).emit('claude:permission_request', {
+      // Emit permission request to all clients in session room
+      this.emitToSession(sessionId, 'claude:permission_request', {
         sessionId,
         requestId: toolUseId,
         toolName,
@@ -686,9 +727,8 @@ export class ClaudeSessionManager {
         toolUseId,
       });
 
-      this.logger.info('Permission request emitted to client', {
+      this.logger.info('Permission request emitted to session room', {
         sessionId,
-        socketId: session.socketId,
         toolName,
         toolUseId,
         pendingCount: session.pendingPermissions.size,
@@ -779,9 +819,9 @@ export class ClaudeSessionManager {
         slashCommandCount: slashCommands.length,
       });
 
-      // Emit slash commands to client
+      // Emit slash commands to all clients in session room
       if (slashCommands.length > 0) {
-        this.io.to(session.socketId).emit('claude:slash_commands', {
+        this.emitToSession(sessionId, 'claude:slash_commands', {
           sessionId,
           commands: slashCommands,
         });
@@ -851,7 +891,8 @@ export class ClaudeSessionManager {
     // Persist to database
     this.persistMessageHistory(sessionId, session);
 
-    this.io.to(session.socketId).emit('claude:message', {
+    // Emit to all clients in session room
+    this.emitToSession(sessionId, 'claude:message', {
       sessionId,
       message: clientMessage,
     });
@@ -882,7 +923,7 @@ export class ClaudeSessionManager {
    */
   private async handleUserMessage(
     sessionId: string,
-    session: ActiveClaudeSession,
+    _session: ActiveClaudeSession,
     message: SDKUserMessage
   ): Promise<void> {
     // Log all user messages to debug tool result capture
@@ -917,13 +958,13 @@ export class ClaudeSessionManager {
       });
 
       if (toolUseId) {
-        this.logger.info('Emitting tool result to client', {
+        this.logger.info('Emitting tool result to session room', {
           sessionId,
           toolUseId,
         });
 
-        // Emit tool result to client
-        this.io.to(session.socketId).emit('claude:tool_result', {
+        // Emit tool result to all clients in session room
+        this.emitToSession(sessionId, 'claude:tool_result', {
           sessionId,
           toolUseId,
           result: message.tool_use_result,
@@ -938,7 +979,7 @@ export class ClaudeSessionManager {
         message: message.message,
       };
 
-      this.io.to(session.socketId).emit('claude:message', {
+      this.emitToSession(sessionId, 'claude:message', {
         sessionId,
         message: clientMessage,
       });
@@ -1010,7 +1051,8 @@ export class ClaudeSessionManager {
       numTurns: 'num_turns' in message ? message.num_turns : undefined,
     });
 
-    this.io.to(session.socketId).emit('claude:result', {
+    // Emit result to all clients in session room
+    this.emitToSession(sessionId, 'claude:result', {
       sessionId,
       usage: message.usage,
       modelUsage: message.modelUsage,
@@ -1091,7 +1133,7 @@ export class ClaudeSessionManager {
     if (session.thinking !== thinking) {
       session.thinking = thinking;
       this.logger.debug('Thinking state changed', { sessionId, thinking });
-      this.io.to(session.socketId).emit('claude:thinking', {
+      this.emitToSession(sessionId, 'claude:thinking', {
         sessionId,
         thinking,
       });
@@ -1099,7 +1141,7 @@ export class ClaudeSessionManager {
   }
 
   /**
-   * Force emit thinking state to client regardless of current state
+   * Force emit thinking state to all clients regardless of current state
    * Used after permission responses when client state may be out of sync
    */
   private forceEmitThinking(sessionId: string, thinking: boolean): void {
@@ -1110,7 +1152,7 @@ export class ClaudeSessionManager {
 
     session.thinking = thinking;
     this.logger.debug('Force emitting thinking state', { sessionId, thinking });
-    this.io.to(session.socketId).emit('claude:thinking', {
+    this.emitToSession(sessionId, 'claude:thinking', {
       sessionId,
       thinking,
     });
@@ -1126,7 +1168,7 @@ export class ClaudeSessionManager {
     }
 
     this.logger.error('Claude session error', { sessionId, error: error.message });
-    this.io.to(session.socketId).emit('claude:error', {
+    this.emitToSession(sessionId, 'claude:error', {
       sessionId,
       error: error.message,
     });

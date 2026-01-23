@@ -98,9 +98,12 @@ export async function server(
   const httpServer = http.createServer(app);
   const io = new Server(httpServer, {
     path: '/socket.io',
+    // Increased timeouts for better reliability over high-latency connections
     pingInterval: 25000,
-    pingTimeout: 20000,
+    pingTimeout: 60000, // Increased from 20s to 60s for geographic distance
     maxHttpBufferSize: 10e6, // 10MB - allows large file attachments (base64 encoded)
+    // Allow both websocket and polling for better compatibility
+    transports: ['websocket', 'polling'],
   });
 
   await new Promise<void>((resolve) => {

@@ -18,19 +18,41 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const newSocket = io({
       path: '/socket.io',
+      // Reconnection settings for better reliability
+      reconnection: true,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnectionDelayMax: 10000,
+      // Connection timeout for initial connection
+      timeout: 30000,
+      // Transport settings - prefer websocket but fall back to polling
+      transports: ['websocket', 'polling'],
+      upgrade: true,
     });
 
-    const handleConnect = () => setIsConnected(true);
-    const handleDisconnect = () => setIsConnected(false);
+    const handleConnect = () => {
+      console.log('[Socket] Connected');
+      setIsConnected(true);
+    };
+    const handleDisconnect = (reason: string) => {
+      console.log('[Socket] Disconnected:', reason);
+      setIsConnected(false);
+    };
     const handleConnectError = (error: Error) => {
-      console.error('Socket connection error:', error);
+      console.error('[Socket] Connection error:', error.message);
+    };
+    const handleReconnect = (attemptNumber: number) => {
+      console.log('[Socket] Reconnected after', attemptNumber, 'attempts');
+    };
+    const handleReconnectAttempt = (attemptNumber: number) => {
+      console.log('[Socket] Reconnection attempt', attemptNumber);
     };
 
     newSocket.on('connect', handleConnect);
     newSocket.on('disconnect', handleDisconnect);
     newSocket.on('connect_error', handleConnectError);
+    newSocket.io.on('reconnect', handleReconnect);
+    newSocket.io.on('reconnect_attempt', handleReconnectAttempt);
 
     setSocket(newSocket);
 
@@ -38,6 +60,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       newSocket.off('connect', handleConnect);
       newSocket.off('disconnect', handleDisconnect);
       newSocket.off('connect_error', handleConnectError);
+      newSocket.io.off('reconnect', handleReconnect);
+      newSocket.io.off('reconnect_attempt', handleReconnectAttempt);
       newSocket.disconnect();
     };
   }, []);
