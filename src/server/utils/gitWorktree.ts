@@ -214,14 +214,21 @@ export async function createWorktree(options: CreateWorktreeOptions): Promise<Cr
 }
 
 /**
- * Remove a git worktree
+ * Remove a git worktree and optionally delete the branch
  */
 export async function removeWorktree(
   baseDir: string,
   worktreePath: string,
-  force = false
+  force = false,
+  deleteBranchAfter = true
 ): Promise<{ success: boolean; error?: string }> {
-  logger.info('Removing worktree', { baseDir, worktreePath, force });
+  logger.info('Removing worktree', { baseDir, worktreePath, force, deleteBranchAfter });
+
+  // Get the branch name before removing the worktree
+  let branchName: string | null = null;
+  if (deleteBranchAfter) {
+    branchName = await getCurrentBranch(worktreePath);
+  }
 
   try {
     const cmd = force
@@ -230,6 +237,24 @@ export async function removeWorktree(
 
     await execAsync(cmd, { cwd: baseDir });
     logger.info('Worktree removed successfully', { worktreePath });
+
+    // Delete the branch if requested and we have a branch name
+    if (deleteBranchAfter && branchName) {
+      const defaultBranch = await getDefaultBranch(baseDir);
+      // Don't delete the default branch
+      if (branchName !== defaultBranch) {
+        const deleteResult = await deleteBranch(baseDir, branchName, force);
+        if (!deleteResult.success) {
+          logger.warn('Worktree removed but failed to delete branch', {
+            branch: branchName,
+            error: deleteResult.error,
+          });
+        } else {
+          logger.info('Branch deleted', { branch: branchName });
+        }
+      }
+    }
+
     return { success: true };
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);

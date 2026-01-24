@@ -1,5 +1,7 @@
 import { Search, FileText, Hash } from 'lucide-react';
 import { ToolCard } from './ToolCard';
+import { useWorkingDir } from '../../../contexts/WorkingDirContext';
+import { toRelativePath } from '../../../utils/paths';
 
 interface GrepToolUseProps {
   input: {
@@ -19,9 +21,11 @@ interface GrepToolUseProps {
 }
 
 export function GrepToolUse({ input, output }: GrepToolUseProps) {
+  const workingDir = useWorkingDir();
   const fileCount = output
     ? output.split('\n').filter((line) => line.trim()).length
     : undefined;
+  const displayPath = input.path ? toRelativePath(input.path, workingDir) : undefined;
 
   return (
     <ToolCard
@@ -34,10 +38,10 @@ export function GrepToolUse({ input, output }: GrepToolUseProps) {
       }
     >
       <div className="mt-2 flex flex-wrap gap-2 text-xs text-purple-600 dark:text-purple-400">
-        {input.path && (
+        {displayPath && (
           <span className="flex items-center gap-1 min-w-0">
             <FileText className="h-3 w-3 flex-shrink-0" />
-            <span className="break-all">{input.path}</span>
+            <span className="break-all">{displayPath}</span>
           </span>
         )}
         {input.glob && (

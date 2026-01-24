@@ -1,6 +1,8 @@
 import { FileEdit } from 'lucide-react';
 import { useState } from 'react';
 import { ToolCard } from './ToolCard';
+import { useWorkingDir } from '../../../contexts/WorkingDirContext';
+import { toRelativePath } from '../../../utils/paths';
 
 interface EditToolUseProps {
   input: {
@@ -11,7 +13,9 @@ interface EditToolUseProps {
 }
 
 export function EditToolUse({ input }: EditToolUseProps) {
+  const workingDir = useWorkingDir();
   const [isExpanded, setIsExpanded] = useState(false);
+  const displayPath = toRelativePath(input.file_path || '', workingDir);
 
   // Calculate line counts for both old and new strings
   const oldLines = input.old_string?.split('\n') || [];
@@ -27,7 +31,7 @@ export function EditToolUse({ input }: EditToolUseProps) {
     <ToolCard
       icon={FileEdit}
       color="orange"
-      title={<>Edit: {input.file_path || 'file'}</>}
+      title={<>Edit: {displayPath || 'file'}</>}
       badge={<>{isExpanded ? '▼' : '▶'} {oldLines.length} → {newLines.length} lines</>}
       onClick={() => setIsExpanded(!isExpanded)}
     >

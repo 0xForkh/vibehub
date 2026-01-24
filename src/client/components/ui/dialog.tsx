@@ -75,4 +75,61 @@ const DialogDescription = React.forwardRef<
 ))
 DialogDescription.displayName = "DialogDescription"
 
-export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription }
+interface ConfirmDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  description?: string
+  confirmLabel?: string
+  cancelLabel?: string
+  variant?: 'default' | 'destructive'
+  onConfirm: () => void
+}
+
+const ConfirmDialog = ({
+  open,
+  onOpenChange,
+  title,
+  description,
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
+  variant = 'default',
+  onConfirm,
+}: ConfirmDialogProps) => {
+  const handleConfirm = () => {
+    onConfirm()
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description && <DialogDescription>{description}</DialogDescription>}
+        </DialogHeader>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            onClick={() => onOpenChange(false)}
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            {cancelLabel}
+          </button>
+          <button
+            onClick={handleConfirm}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium text-white",
+              variant === 'destructive'
+                ? "bg-red-600 hover:bg-red-700"
+                : "bg-blue-600 hover:bg-blue-700"
+            )}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, ConfirmDialog }

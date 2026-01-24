@@ -1,5 +1,7 @@
 import { FolderSearch, FileText, Hash } from 'lucide-react';
 import { ToolCard } from './ToolCard';
+import { useWorkingDir } from '../../../contexts/WorkingDirContext';
+import { toRelativePath } from '../../../utils/paths';
 
 interface GlobToolUseProps {
   input: {
@@ -10,9 +12,12 @@ interface GlobToolUseProps {
 }
 
 export function GlobToolUse({ input, output }: GlobToolUseProps) {
+  const workingDir = useWorkingDir();
   const fileCount = output
     ? output.split('\n').filter((line) => line.trim()).length
     : undefined;
+  const displayPath = input.path ? toRelativePath(input.path, workingDir) : undefined;
+  const displayPattern = toRelativePath(input.pattern, workingDir);
 
   return (
     <ToolCard
@@ -20,14 +25,14 @@ export function GlobToolUse({ input, output }: GlobToolUseProps) {
       color="amber"
       title={
         <>
-          Finding: <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">{input.pattern}</code>
+          Finding: <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">{displayPattern}</code>
         </>
       }
     >
-      {input.path && (
+      {displayPath && (
         <div className="mt-1 flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
           <FileText className="h-3 w-3 flex-shrink-0" />
-          <span className="min-w-0 break-all">in {input.path}</span>
+          <span className="min-w-0 break-all">in {displayPath}</span>
         </div>
       )}
 

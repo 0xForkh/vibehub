@@ -1,7 +1,9 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Plus, Check, MoreVertical, Trash2, Play, ExternalLink, ArrowRight, ArrowLeft, Paperclip, File, Loader2, AlertCircle, Eye } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Badge } from '../../ui/badge';
+import { ConfirmDialog } from '../../ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,7 +14,6 @@ import { getTaskStatus, type Task, type TaskStatus, type TaskAttachment, type Se
 import { AttachmentDisplay, FileAttachmentArea } from '../../shared/FileAttachmentArea';
 import { useFileAttachments, type FileAttachment } from '../../../hooks/useFileAttachments';
 import { useFileMention, parseFileMentions } from '../../../hooks/useFileMention';
-import { useEffect, useRef, useCallback } from 'react';
 
 // Suppress unused import warning - Plus is re-exported for TaskAddForm
 void Plus;
@@ -131,6 +132,9 @@ export function TaskCard({
 }: TaskCardProps) {
   const status = getTaskStatus(task, validSessionIds);
   const hasValidSession = task.sessionId && (!validSessionIds || validSessionIds.has(task.sessionId));
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDoneConfirm, setShowDoneConfirm] = useState(false);
 
   const {
     attachments,
@@ -489,7 +493,7 @@ export function TaskCard({
             variant="ghost"
             size="sm"
             className="h-7 w-7 p-0 text-green-600 hover:bg-green-100 hover:text-green-700 dark:text-green-400 dark:hover:bg-green-900/30"
-            onClick={onMarkDone}
+            onClick={() => setShowDoneConfirm(true)}
             title="Mark as done"
           >
             <Check className="h-4 w-4" />
@@ -503,7 +507,7 @@ export function TaskCard({
             <DropdownMenuContent align="end">
               <DropdownMenuItem
                 className="text-red-500 focus:text-red-500"
-                onClick={onDelete}
+                onClick={() => setShowDeleteConfirm(true)}
               >
                 <Trash2 className="h-3 w-3" />
                 Delete
@@ -542,6 +546,25 @@ export function TaskCard({
           <AttachmentDisplay attachments={displayAttachments} compact />
         </div>
       )}
+
+      {/* Confirmation Dialogs */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        onOpenChange={setShowDeleteConfirm}
+        title="Delete task?"
+        description={`"${task.title}" will be permanently deleted.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={onDelete}
+      />
+      <ConfirmDialog
+        open={showDoneConfirm}
+        onOpenChange={setShowDoneConfirm}
+        title="Mark as done?"
+        description={`"${task.title}" will be archived and removed from the board.`}
+        confirmLabel="Mark done"
+        onConfirm={onMarkDone}
+      />
     </div>
   );
 }

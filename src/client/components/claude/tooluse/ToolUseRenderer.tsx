@@ -11,6 +11,7 @@ import { GlobToolUse } from './GlobToolUse';
 import { McpToolUse } from './McpToolUse';
 import { DefaultToolUse } from './DefaultToolUse';
 import { ExitPlanModeToolUse } from './ExitPlanModeToolUse';
+import { ImageToolUse } from './ImageToolUse';
 
 interface ApprovalButtonsProps {
   toolName: string;
@@ -248,8 +249,31 @@ export function ToolUseRenderer({
 
   // Default rendering for unknown tools or incomplete data
   if (!toolComponent) {
+    // Check for image tools (mcp__image-tools__generate_image, mcp__image-tools__edit_image)
+    if (toolName === 'mcp__image-tools__generate_image' || toolName === 'mcp__image-tools__edit_image') {
+      // Parse output from JSON string if needed
+      let parsedOutput;
+      if (typeof output === 'string') {
+        try {
+          parsedOutput = JSON.parse(output);
+        } catch {
+          parsedOutput = output;
+        }
+      } else if (output && typeof output === 'object' && 'text' in output) {
+        try {
+          parsedOutput = JSON.parse((output as { text: string }).text);
+        } catch {
+          parsedOutput = output;
+        }
+      } else {
+        parsedOutput = output;
+      }
+
+      const imageToolName = toolName === 'mcp__image-tools__generate_image' ? 'generate_image' : 'edit_image';
+      toolComponent = <ImageToolUse toolName={imageToolName} input={input} output={parsedOutput} />;
+    }
     // Check if it's an MCP tool (mcp__server__tool format)
-    if (toolName.startsWith('mcp__')) {
+    else if (toolName.startsWith('mcp__')) {
       toolComponent = <McpToolUse toolName={toolName} input={input} />;
     } else {
       toolComponent = <DefaultToolUse toolName={toolName} input={input} />;

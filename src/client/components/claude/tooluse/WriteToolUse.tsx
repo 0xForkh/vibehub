@@ -1,6 +1,8 @@
 import { FolderPlus } from 'lucide-react';
 import { useState } from 'react';
 import { ToolCard } from './ToolCard';
+import { useWorkingDir } from '../../../contexts/WorkingDirContext';
+import { toRelativePath } from '../../../utils/paths';
 
 interface WriteToolUseProps {
   input: {
@@ -10,8 +12,10 @@ interface WriteToolUseProps {
 }
 
 export function WriteToolUse({ input }: WriteToolUseProps) {
+  const workingDir = useWorkingDir();
   const [isExpanded, setIsExpanded] = useState(false);
   const hasContent = input.content && input.content.length > 0;
+  const displayPath = toRelativePath(input.file_path || '', workingDir);
 
   // Truncate content for preview
   const previewLines = 5;
@@ -23,7 +27,7 @@ export function WriteToolUse({ input }: WriteToolUseProps) {
     <ToolCard
       icon={FolderPlus}
       color="purple"
-      title={<>Writing: {input.file_path || 'file'}</>}
+      title={<>Writing: {displayPath || 'file'}</>}
       badge={hasContent ? <>{isExpanded ? '▼' : '▶'} {contentLines.length} lines</> : undefined}
       onClick={hasContent ? () => setIsExpanded(!isExpanded) : undefined}
     >

@@ -25,8 +25,8 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       reconnectionDelayMax: 10000,
       // Connection timeout for initial connection
       timeout: 30000,
-      // Transport settings - prefer websocket but fall back to polling
-      transports: ['websocket', 'polling'],
+      // Start with polling, upgrade to websocket (polling first avoids wss:// bug)
+      transports: ['polling', 'websocket'],
       upgrade: true,
     });
 

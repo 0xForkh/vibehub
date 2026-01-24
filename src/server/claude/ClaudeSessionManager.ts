@@ -1,7 +1,9 @@
 import { logger as getLogger } from '../../shared/logger.js';
 import { getStorageBackend } from '../database/redis.js';
+import { createPreviewToolsServer } from '../preview/index.js';
 import { SessionStore } from '../sessions/SessionStore.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
+import { createImageToolsServer } from './tools/imageTools.js';
 import { createKanbanToolsServer } from './tools/kanbanTools.js';
 import { createSessionToolsServer } from './tools/sessionTools.js';
 import type { PermissionResult, SDKMessage, SDKAssistantMessage, SDKUserMessage, SDKResultMessage, SDKSystemMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -279,6 +281,15 @@ export class ClaudeSessionManager {
       currentSessionId: sessionId,
     });
 
+    // Create image tools MCP server for this session
+    const imageToolsServer = createImageToolsServer({
+      workingDir,
+      currentSessionId: sessionId,
+    });
+
+    // Create preview tools MCP server
+    const previewToolsServer = createPreviewToolsServer();
+
     const service = new ClaudeAgentService({
       workingDir,
       sessionId: resumeSessionId,
@@ -287,6 +298,8 @@ export class ClaudeSessionManager {
       mcpServers: {
         'session-tools': sessionToolsServer,
         'kanban-tools': kanbanToolsServer,
+        'image-tools': imageToolsServer,
+        'preview-tools': previewToolsServer,
       },
       onMessage: (message) => this.handleMessage(sessionId, message),
       onPermissionRequest: async (toolName, input, toolUseId) => this.handlePermissionRequest(sessionId, toolName, input, toolUseId),

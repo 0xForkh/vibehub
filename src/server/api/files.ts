@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { Router, type Router as ExpressRouter, Request, Response } from 'express';
 import { logger as getLogger } from '../../shared/logger.js';
 import { FileSystemService } from '../claude/FileSystemService.js';
@@ -100,6 +102,58 @@ router.get('/search', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Failed to search files', { err });
     res.status(500).json({ error: 'Failed to search files' });
+  }
+});
+
+/**
+ * GET /api/files/raw - Serve raw file content (for images, etc.)
+ * Query params:
+ *   - path: absolute file path (required)
+ */
+router.get('/raw', async (req: Request, res: Response) => {
+  try {
+    const filePath = req.query.path as string;
+
+    if (!filePath) {
+      res.status(400).json({ error: 'Path is required' });
+      return;
+    }
+
+    // Security: block sensitive paths
+    const blockedPatterns = ['/etc/', '/var/', '/usr/', '/.ssh/', '/.env', '/node_modules/'];
+    if (blockedPatterns.some(pattern => filePath.includes(pattern))) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'File not found' });
+      return;
+    }
+
+    // Determine content type based on extension
+    const ext = path.extname(filePath).toLowerCase();
+    const contentTypes: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+      '.bmp': 'image/bmp',
+      '.pdf': 'application/pdf',
+    };
+
+    const contentType = contentTypes[ext] || 'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'max-age=3600'); // Cache for 1 hour
+
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+  } catch (err) {
+    logger.error('Failed to serve raw file', { err });
+    res.status(500).json({ error: 'Failed to serve file' });
   }
 });
 

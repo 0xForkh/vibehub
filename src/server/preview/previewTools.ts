@@ -191,10 +191,10 @@ async function analyzeProject(projectPath: string): Promise<ProjectAnalysis> {
         }
       }
 
-      // Use preview_url for URL variables
+      // Use preview_url for URL variables (literal string for preview config)
       if (key.includes('URL') && !value.includes('localhost')) {
-        // eslint-disable-next-line camelcase
-        analysis.envVars[key] = String.raw`${preview_url}`;
+        // eslint-disable-next-line no-template-curly-in-string
+        analysis.envVars[key] = '${preview_url}';
       } else {
         analysis.envVars[key] = value;
       }
