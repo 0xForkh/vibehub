@@ -5,56 +5,91 @@
  */
 
 import { readFile, writeFile, mkdir, access } from 'fs/promises';
-import { join, dirname } from 'path';
+import { join } from 'path';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
-import YAML from 'yaml';
 import { z } from 'zod';
 import { logger as getLogger } from '../../shared/logger.js';
 import { getPreviewManager } from './PreviewManager.js';
 
 const logger = getLogger();
 
-const PREVIEW_YAML_TEMPLATE = `# Vibehub Preview Configuration
-# Ports are randomly allocated at runtime - no manual offset management needed.
+const DOCKER_COMPOSE_TEMPLATE = `# Preview environment for Vibehub worktrees
+# Environment variable provided by Vibehub:
+#   PREVIEW_PORT - External port exposed via Caddy
 #
-# Service types:
-# - docker: Start a container (postgres, redis, etc.)
-# - process: Start a dev server command
-# - port: Just allocate a port (for multi-port apps)
-#
-# Key concepts:
-# - expose: true on ONE process service to get a Caddy route
-# - setup: Commands run before starting (first runs parallel with Docker health checks)
-# - \${service.port}: Resolves to the randomly allocated port
-# - \${preview_url}: The full preview URL
-#
-# For apps with separate frontend/backend, use Vite's proxy to route /api to backend.
-
-name: {{PROJECT_NAME}}
+# Usage: docker compose -p preview-{sessionId} up -d --build
 
 services:
-{{SERVICES}}
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-# Environment variables template
-env:
-{{ENV_VARS}}
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  dev:
+    build:
+      context: ..
+      dockerfile: .vibehub/Dockerfile
+    ports:
+      - "\${PREVIEW_PORT}:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      API_PORT: 3001
+      VITE_PORT: 3000
+      DATABASE_URL: postgresql://app:app@postgres:5432/app
+      REDIS_URL: redis://redis:6379
+{{EXTRA_ENV}}
+    volumes:
+      - ..:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 `;
 
-interface AnalyzedService {
-  name: string;
-  type: 'docker' | 'process' | 'port';
-  image?: string;
-  internal_port?: number;
-  command?: string;
-  expose?: boolean;
-  environment?: Record<string, string>;
-  volumes?: string[];
-}
+const DOCKERFILE_TEMPLATE = `# Preview Dockerfile for Vibehub worktrees
+# Runs dev servers in a single container
+# Source code is mounted as a volume for hot reload
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install pnpm
+RUN npm install -g pnpm
+
+# Expose the dev server port
+EXPOSE 3000
+
+# Install deps and start dev
+CMD ["sh", "-c", "{{STARTUP_CMD}}"]
+`;
 
 interface ProjectAnalysis {
   name: string;
-  services: AnalyzedService[];
-  envVars: Record<string, string>;
+  packageManager: 'npm' | 'pnpm' | 'yarn' | 'bun';
+  hasBackend: boolean;
+  hasPrisma: boolean;
+  extraEnvVars: Record<string, string>;
+  startupCommands: string[];
 }
 
 /**
@@ -63,101 +98,84 @@ interface ProjectAnalysis {
 async function analyzeProject(projectPath: string): Promise<ProjectAnalysis> {
   const analysis: ProjectAnalysis = {
     name: '',
-    services: [],
-    envVars: {},
+    packageManager: 'npm',
+    hasBackend: false,
+    hasPrisma: false,
+    extraEnvVars: {},
+    startupCommands: [],
   };
+
+  // Detect package manager
+  try {
+    await access(join(projectPath, 'pnpm-lock.yaml'));
+    analysis.packageManager = 'pnpm';
+  } catch {
+    try {
+      await access(join(projectPath, 'yarn.lock'));
+      analysis.packageManager = 'yarn';
+    } catch {
+      try {
+        await access(join(projectPath, 'bun.lockb'));
+        analysis.packageManager = 'bun';
+      } catch {
+        analysis.packageManager = 'npm';
+      }
+    }
+  }
 
   // Get project name from package.json or directory name
   try {
     const pkgPath = join(projectPath, 'package.json');
     const pkgContent = await readFile(pkgPath, 'utf-8');
     const pkg = JSON.parse(pkgContent);
-    analysis.name = pkg.name || dirname(projectPath).split('/').pop() || 'my-project';
+    analysis.name = pkg.name || projectPath.split('/').pop() || 'my-project';
   } catch {
-    analysis.name = dirname(projectPath).split('/').pop() || 'my-project';
+    analysis.name = projectPath.split('/').pop() || 'my-project';
   }
 
-  // Sanitize name for use in configs
+  // Sanitize name
   analysis.name = analysis.name.replace(/[^a-zA-Z0-9-]/g, '-');
 
-  // Check for docker-compose.yml
+  // Check for backend folder (monorepo structure)
   try {
-    const composePath = join(projectPath, 'docker-compose.yml');
-    await access(composePath);
-    const composeContent = await readFile(composePath, 'utf-8');
-    const compose = YAML.parse(composeContent);
+    await access(join(projectPath, 'backend'));
+    analysis.hasBackend = true;
 
-    if (compose.services) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const [serviceName, serviceConfig] of Object.entries(compose.services as Record<string, any>)) {
-        // Skip services that are typically shared (like minio/s3)
-        if (serviceName.includes('minio') || serviceName.includes('s3')) {
-          // eslint-disable-next-line no-continue
-          continue;
-        }
-
-        const service: AnalyzedService = {
-          name: serviceName,
-          type: 'docker',
-          image: serviceConfig.image,
-        };
-
-        // Extract internal port from port mapping
-        if (serviceConfig.ports && serviceConfig.ports.length > 0) {
-          const portMapping = serviceConfig.ports[0];
-          const match = String(portMapping).match(/(\d+):(\d+)/);
-          if (match) {
-            service.internal_port = parseInt(match[2], 10);
-          }
-        }
-
-        // Extract environment
-        if (serviceConfig.environment) {
-          service.environment = {};
-          if (Array.isArray(serviceConfig.environment)) {
-            for (const env of serviceConfig.environment) {
-              const [key, value] = env.split('=');
-              service.environment[key] = value;
-            }
-          } else {
-            service.environment = serviceConfig.environment;
-          }
-        }
-
-        // Extract volumes
-        if (serviceConfig.volumes) {
-          service.volumes = serviceConfig.volumes.filter((v: string) => !v.startsWith('/') && !v.startsWith('.'));
-        }
-
-        analysis.services.push(service);
-      }
+    // Check for Prisma
+    try {
+      await access(join(projectPath, 'backend', 'prisma'));
+      analysis.hasPrisma = true;
+    } catch {
+      // No prisma
     }
   } catch {
-    // No docker-compose, that's fine
-  }
-
-  // Check for package.json scripts to detect dev servers
-  try {
-    const pkgPath = join(projectPath, 'package.json');
-    const pkgContent = await readFile(pkgPath, 'utf-8');
-    const pkg = JSON.parse(pkgContent);
-
-    if (pkg.scripts) {
-      // Look for a "dev" script that runs everything
-      if (pkg.scripts.dev) {
-        analysis.services.push({
-          name: 'dev',
-          type: 'process',
-          command: 'npm run dev',
-          expose: true, // Gets Caddy route
-        });
-      }
+    // No backend folder - single app structure
+    try {
+      await access(join(projectPath, 'prisma'));
+      analysis.hasPrisma = true;
+    } catch {
+      // No prisma
     }
-  } catch {
-    // No package.json scripts
   }
 
-  // Check for .env.example to suggest env vars
+  // Build startup commands
+  const pm = analysis.packageManager;
+  const installCmd = pm === 'npm' ? 'npm install' : `${pm} install`;
+
+  analysis.startupCommands.push(installCmd);
+
+  if (analysis.hasPrisma) {
+    if (analysis.hasBackend) {
+      analysis.startupCommands.push('cd backend && npx prisma generate && npx prisma migrate deploy && cd /app');
+    } else {
+      analysis.startupCommands.push('npx prisma generate && npx prisma migrate deploy');
+    }
+  }
+
+  const devCmd = pm === 'npm' ? 'npm run dev' : `${pm} dev`;
+  analysis.startupCommands.push(devCmd);
+
+  // Check for .env.example to extract extra env vars
   try {
     const envPath = join(projectPath, '.env.example');
     const envContent = await readFile(envPath, 'utf-8');
@@ -173,31 +191,13 @@ async function analyzeProject(projectPath: string): Promise<ProjectAnalysis> {
 
       const value = valueParts.join('=');
 
-      // Replace localhost port references with service port templates
-      const portMatch = value.match(/localhost:(\d+)/);
-      if (portMatch) {
-        // Try to find a matching service by common port patterns
-        const port = parseInt(portMatch[1], 10);
-        let serviceName: string | null = null;
+      // Skip standard env vars that are already in template
+      const standardKeys = ['DATABASE_URL', 'REDIS_URL', 'NODE_ENV', 'PORT'];
+      // eslint-disable-next-line no-continue
+      if (standardKeys.includes(key)) continue;
 
-        if (port === 5432) serviceName = 'postgres';
-        else if (port === 6379) serviceName = 'redis';
-        else if (port === 1025) serviceName = 'mailhog';
-
-        if (serviceName && analysis.services.some(s => s.name === serviceName)) {
-          analysis.envVars[key] = value.replace(/localhost:\d+/, `localhost:\${${  serviceName  }.port}`);
-          // eslint-disable-next-line no-continue
-          continue;
-        }
-      }
-
-      // Use preview_url for URL variables (literal string for preview config)
-      if (key.includes('URL') && !value.includes('localhost')) {
-        // eslint-disable-next-line no-template-curly-in-string
-        analysis.envVars[key] = '${preview_url}';
-      } else {
-        analysis.envVars[key] = value;
-      }
+      // Add app-specific env vars
+      analysis.extraEnvVars[key] = value || 'TODO';
     }
   } catch {
     // No .env.example
@@ -207,53 +207,26 @@ async function analyzeProject(projectPath: string): Promise<ProjectAnalysis> {
 }
 
 /**
- * Generate preview.yaml content from analysis
+ * Generate docker-compose.yml content from analysis
  */
-function generatePreviewYaml(analysis: ProjectAnalysis): string {
-  // Generate services section
-  const servicesLines: string[] = [];
-  for (const service of analysis.services) {
-    servicesLines.push(`  ${service.name}:`);
-    servicesLines.push(`    type: ${service.type}`);
-
-    if (service.type === 'docker') {
-      servicesLines.push(`    image: ${service.image}`);
-      servicesLines.push(`    internal_port: ${service.internal_port}`);
-
-      if (service.environment && Object.keys(service.environment).length > 0) {
-        servicesLines.push('    environment:');
-        for (const [key, value] of Object.entries(service.environment)) {
-          servicesLines.push(`      ${key}: ${value}`);
-        }
-      }
-
-      if (service.volumes && service.volumes.length > 0) {
-        servicesLines.push('    volumes:');
-        for (const vol of service.volumes) {
-          servicesLines.push(`      - ${vol}`);
-        }
-      }
-    } else if (service.type === 'process') {
-      servicesLines.push(`    command: ${service.command}`);
-      if (service.expose) {
-        servicesLines.push('    expose: true');
-      }
-    }
-    // type: 'port' services just need the type line
-
-    servicesLines.push('');
-  }
-
-  // Generate env section
+function generateDockerCompose(analysis: ProjectAnalysis): string {
+  // Generate extra env vars
   const envLines: string[] = [];
-  for (const [key, value] of Object.entries(analysis.envVars)) {
-    envLines.push(`  ${key}: "${value}"`);
+  for (const [key, value] of Object.entries(analysis.extraEnvVars)) {
+    envLines.push(`      ${key}: ${value}`);
   }
 
-  return PREVIEW_YAML_TEMPLATE
-    .replace('{{PROJECT_NAME}}', analysis.name)
-    .replace('{{SERVICES}}', servicesLines.join('\n'))
-    .replace('{{ENV_VARS}}', envLines.join('\n'));
+  const extraEnv = envLines.length > 0 ? envLines.join('\n') : '      # Add app-specific env vars here';
+
+  return DOCKER_COMPOSE_TEMPLATE.replace('{{EXTRA_ENV}}', extraEnv);
+}
+
+/**
+ * Generate Dockerfile content from analysis
+ */
+function generateDockerfile(analysis: ProjectAnalysis): string {
+  const startupCmd = analysis.startupCommands.join(' && ');
+  return DOCKERFILE_TEMPLATE.replace('{{STARTUP_CMD}}', startupCmd);
 }
 
 /**
@@ -294,18 +267,21 @@ For monorepos with concurrently-based dev scripts, consider using a single 'dev'
           logger.info('init_preview_config tool called', { projectPath: args.projectPath });
 
           try {
-            // Check if preview.yaml already exists
-            const configPath = join(args.projectPath, '.vibehub', 'preview.yaml');
+            const vibehubDir = join(args.projectPath, '.vibehub');
+            const composePath = join(vibehubDir, 'docker-compose.yml');
+            const dockerfilePath = join(vibehubDir, 'Dockerfile');
+
+            // Check if config already exists
             try {
-              await access(configPath);
+              await access(composePath);
               if (!args.dryRun) {
                 return {
                   content: [{
                     type: 'text' as const,
                     text: JSON.stringify({
                       success: false,
-                      error: 'Preview config already exists at .vibehub/preview.yaml. Delete it first or edit it manually.',
-                      existingPath: configPath,
+                      error: 'Preview config already exists at .vibehub/docker-compose.yml. Delete it first or edit it manually.',
+                      existingPath: composePath,
                     }),
                   }],
                 };
@@ -317,21 +293,9 @@ For monorepos with concurrently-based dev scripts, consider using a single 'dev'
             // Analyze the project
             const analysis = await analyzeProject(args.projectPath);
 
-            if (analysis.services.length === 0) {
-              return {
-                content: [{
-                  type: 'text' as const,
-                  text: JSON.stringify({
-                    success: false,
-                    error: 'Could not detect any services. Make sure the project has a docker-compose.yml or package.json with dev scripts.',
-                    suggestion: 'You can manually create .vibehub/preview.yaml based on the template.',
-                  }),
-                }],
-              };
-            }
-
-            // Generate the YAML content
-            const yamlContent = generatePreviewYaml(analysis);
+            // Generate the files
+            const composeContent = generateDockerCompose(analysis);
+            const dockerfileContent = generateDockerfile(analysis);
 
             if (args.dryRun) {
               return {
@@ -342,33 +306,39 @@ For monorepos with concurrently-based dev scripts, consider using a single 'dev'
                     dryRun: true,
                     analysis: {
                       name: analysis.name,
-                      services: analysis.services.map(s => s.name),
-                      serviceCount: analysis.services.length,
+                      packageManager: analysis.packageManager,
+                      hasBackend: analysis.hasBackend,
+                      hasPrisma: analysis.hasPrisma,
                     },
-                    generatedContent: yamlContent,
+                    files: {
+                      'docker-compose.yml': composeContent,
+                      'Dockerfile': dockerfileContent,
+                    },
                   }),
                 }],
               };
             }
 
-            // Write the file
-            await mkdir(join(args.projectPath, '.vibehub'), { recursive: true });
-            await writeFile(configPath, yamlContent);
+            // Write the files
+            await mkdir(vibehubDir, { recursive: true });
+            await writeFile(composePath, composeContent);
+            await writeFile(dockerfilePath, dockerfileContent);
 
-            logger.info('Preview config generated', { configPath });
+            logger.info('Preview config generated', { composePath, dockerfilePath });
 
             return {
               content: [{
                 type: 'text' as const,
                 text: JSON.stringify({
                   success: true,
-                  configPath,
+                  files: [composePath, dockerfilePath],
                   analysis: {
                     name: analysis.name,
-                    services: analysis.services.map(s => s.name),
-                    serviceCount: analysis.services.length,
+                    packageManager: analysis.packageManager,
+                    hasBackend: analysis.hasBackend,
+                    hasPrisma: analysis.hasPrisma,
                   },
-                  message: 'Preview config created. Review and adjust the generated .vibehub/preview.yaml file.',
+                  message: 'Preview config created. Review and adjust the generated .vibehub/docker-compose.yml and .vibehub/Dockerfile files.',
                 }),
               }],
             };
