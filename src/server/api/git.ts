@@ -655,14 +655,14 @@ router.post('/fetch', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/git/pull - Pull from remote
+ * POST /api/git/pull - Smart pull from remote using Claude (SSE stream)
  * Body:
  *   - path: directory path (required)
- *   - remote: remote name (default: origin)
- *   - branch: branch name (optional, uses current branch if not specified)
+ *
+ * Claude will handle rebasing if there are conflicts, stashing changes if needed, etc.
  */
 router.post('/pull', async (req: Request, res: Response) => {
-  const { path: dirPath, remote = 'origin', branch } = req.body;
+  const { path: dirPath } = req.body;
 
   if (!dirPath) {
     res.status(400).json({ error: 'Path is required' });
@@ -674,34 +674,105 @@ router.post('/pull', async (req: Request, res: Response) => {
     return;
   }
 
-  // Check for uncommitted changes
-  const hasChanges = await hasUncommittedChanges(dirPath);
-  if (hasChanges) {
-    res.status(400).json({ error: 'You have uncommitted changes. Please commit or stash them first.' });
-    return;
-  }
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+      (res as unknown as { flush: () => void }).flush();
+    }
+  };
+
+  logger.info('Starting Claude pull', { dirPath });
+  sendEvent('status', { status: 'Starting pull process...' });
+
+  let error: string | null = null;
+
+  const agent = new ClaudeAgentService({
+    workingDir: dirPath,
+    permissionMode: 'acceptEdits',
+    onMessage: (message) => {
+      if (message.type === 'assistant' && typeof message.message?.content === 'string') {
+        sendEvent('message', { text: message.message.content });
+      } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) {
+            sendEvent('message', { text: block.text });
+          }
+        }
+      }
+    },
+    onPermissionRequest: async (toolName, input) => {
+      let description = toolName;
+      if (toolName === 'Bash' && typeof input.command === 'string') {
+        const cmd = input.command as string;
+        if (cmd.includes('git pull')) {
+          description = 'Pulling from remote...';
+        } else if (cmd.includes('git fetch')) {
+          description = 'Fetching from remote...';
+        } else if (cmd.includes('git rebase')) {
+          description = 'Rebasing...';
+        } else if (cmd.includes('git stash')) {
+          description = 'Stashing changes...';
+        } else if (cmd.includes('git status') || cmd.includes('git diff')) {
+          description = 'Checking status...';
+        } else if (cmd.includes('git add')) {
+          description = 'Staging files...';
+        } else if (cmd.includes('git commit')) {
+          description = 'Committing...';
+        } else {
+          description = `Running: ${cmd.slice(0, 50)}${cmd.length > 50 ? '...' : ''}`;
+        }
+      }
+      sendEvent('tool', { tool: toolName, description });
+      return { behavior: 'allow' as const, updatedInput: input };
+    },
+    onError: (err) => {
+      error = err.message;
+      logger.error('Claude pull error', { error: err.message });
+    },
+    onComplete: () => {
+      logger.info('Claude pull completed');
+    },
+  });
+
+  const prompt = `Pull the latest changes from the remote repository in ${dirPath}.
+
+IMPORTANT: Stay in the current working directory. Do not change to a different directory.
+
+Handle these scenarios intelligently:
+1. If there are uncommitted changes, stash them first, pull, then pop the stash
+2. If there are conflicts during pull, try "git pull --rebase" instead
+3. If rebase has conflicts, resolve them intelligently by examining the files
+4. If stash pop has conflicts, resolve them
+
+After completing, briefly summarize what happened (e.g., "Pulled 3 commits from origin/main" or "Pulled with rebase, resolved 1 conflict").`;
 
   try {
-    const branchArg = branch ? ` ${branch}` : '';
-    const { stdout, stderr } = await execAsync(`git pull ${remote}${branchArg}`, { cwd: dirPath });
-    res.json({ success: true, output: stdout || stderr || 'Pulled successfully' });
+    await agent.start(prompt);
+    sendEvent('done', { success: !error, error: error || undefined });
   } catch (err) {
-    logger.error('Failed to pull', { err });
-    const message = err instanceof Error ? err.message : 'Failed to pull';
-    res.status(500).json({ error: message });
+    logger.error('Failed to run Claude pull', { err });
+    sendEvent('done', { success: false, error: 'Failed to run Claude pull' });
   }
+
+  res.end();
 });
 
 /**
- * POST /api/git/push - Push to remote
+ * POST /api/git/push - Smart push to remote using Claude (SSE stream)
  * Body:
  *   - path: directory path (required)
- *   - remote: remote name (default: origin)
- *   - branch: branch name (optional, uses current branch if not specified)
- *   - setUpstream: set upstream tracking (default: false)
+ *
+ * Claude will handle setting upstream, force-with-lease if needed after pulling, etc.
  */
 router.post('/push', async (req: Request, res: Response) => {
-  const { path: dirPath, remote = 'origin', branch, setUpstream = false } = req.body;
+  const { path: dirPath } = req.body;
 
   if (!dirPath) {
     res.status(400).json({ error: 'Path is required' });
@@ -713,16 +784,92 @@ router.post('/push', async (req: Request, res: Response) => {
     return;
   }
 
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+      (res as unknown as { flush: () => void }).flush();
+    }
+  };
+
+  logger.info('Starting Claude push', { dirPath });
+  sendEvent('status', { status: 'Starting push process...' });
+
+  let error: string | null = null;
+
+  const agent = new ClaudeAgentService({
+    workingDir: dirPath,
+    permissionMode: 'acceptEdits',
+    onMessage: (message) => {
+      if (message.type === 'assistant' && typeof message.message?.content === 'string') {
+        sendEvent('message', { text: message.message.content });
+      } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) {
+            sendEvent('message', { text: block.text });
+          }
+        }
+      }
+    },
+    onPermissionRequest: async (toolName, input) => {
+      let description = toolName;
+      if (toolName === 'Bash' && typeof input.command === 'string') {
+        const cmd = input.command as string;
+        if (cmd.includes('git push')) {
+          description = 'Pushing to remote...';
+        } else if (cmd.includes('git pull')) {
+          description = 'Pulling from remote...';
+        } else if (cmd.includes('git fetch')) {
+          description = 'Fetching from remote...';
+        } else if (cmd.includes('git rebase')) {
+          description = 'Rebasing...';
+        } else if (cmd.includes('git status') || cmd.includes('git diff')) {
+          description = 'Checking status...';
+        } else if (cmd.includes('git branch')) {
+          description = 'Checking branch...';
+        } else {
+          description = `Running: ${cmd.slice(0, 50)}${cmd.length > 50 ? '...' : ''}`;
+        }
+      }
+      sendEvent('tool', { tool: toolName, description });
+      return { behavior: 'allow' as const, updatedInput: input };
+    },
+    onError: (err) => {
+      error = err.message;
+      logger.error('Claude push error', { error: err.message });
+    },
+    onComplete: () => {
+      logger.info('Claude push completed');
+    },
+  });
+
+  const prompt = `Push the current branch to the remote repository in ${dirPath}.
+
+IMPORTANT: Stay in the current working directory. Do not change to a different directory.
+
+Handle these scenarios intelligently:
+1. If the branch has no upstream, set it with "git push -u origin <branch>"
+2. If push is rejected because remote has new commits, pull with rebase first, then push again
+3. If there are conflicts during rebase, resolve them intelligently
+4. NEVER use --force, only use --force-with-lease if absolutely necessary after a rebase
+
+After completing, briefly summarize what happened (e.g., "Pushed 2 commits to origin/feature-x" or "Pulled and rebased before pushing").`;
+
   try {
-    const currentBranch = branch || await getCurrentBranch(dirPath);
-    const upstreamFlag = setUpstream ? '-u ' : '';
-    const { stdout, stderr } = await execAsync(`git push ${upstreamFlag}${remote} ${currentBranch}`, { cwd: dirPath });
-    res.json({ success: true, output: stdout || stderr || 'Pushed successfully' });
+    await agent.start(prompt);
+    sendEvent('done', { success: !error, error: error || undefined });
   } catch (err) {
-    logger.error('Failed to push', { err });
-    const message = err instanceof Error ? err.message : 'Failed to push';
-    res.status(500).json({ error: message });
+    logger.error('Failed to run Claude push', { err });
+    sendEvent('done', { success: false, error: 'Failed to run Claude push' });
   }
+
+  res.end();
 });
 
 export { router as gitRouter };

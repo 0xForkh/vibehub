@@ -117,6 +117,12 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
   const [isFetching, setIsFetching] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
+  const [pullStatus, setPullStatus] = useState<string>('');
+  const [pullMessages, setPullMessages] = useState<string[]>([]);
+  const [pullResult, setPullResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [pushStatus, setPushStatus] = useState<string>('');
+  const [pushMessages, setPushMessages] = useState<string[]>([]);
+  const [pushResult, setPushResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const fetchGitData = useCallback(async () => {
     if (!workingDir) return;
@@ -396,6 +402,9 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
     if (!workingDir || isPulling) return;
 
     setIsPulling(true);
+    setPullResult(null);
+    setPullStatus('Starting...');
+    setPullMessages([]);
     setError(null);
 
     try {
@@ -405,14 +414,62 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
         body: JSON.stringify({ path: workingDir }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to pull');
+      // Check if it's an SSE response or error JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType?.includes('application/json')) {
+        const data = await response.json();
+        setError(data.error || 'Failed to pull');
+        setPullResult({ success: false, error: data.error });
+        setIsPulling(false);
+        return;
       }
-      // Refresh data after pull
-      fetchGitData();
+
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'status') {
+                setPullStatus(data.status);
+              } else if (currentEvent === 'tool') {
+                setPullStatus(data.description);
+              } else if (currentEvent === 'message') {
+                setPullMessages(prev => [...prev, data.text]);
+              } else if (currentEvent === 'done') {
+                setPullResult({ success: data.success, error: data.error });
+                if (data.success) {
+                  fetchGitData();
+                }
+              }
+            } catch {
+              // Ignore parse errors
+            }
+            currentEvent = '';
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to pull');
+      setPullResult({ success: false, error: 'Connection error' });
     } finally {
       setIsPulling(false);
     }
@@ -422,23 +479,74 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
     if (!workingDir || isPushing) return;
 
     setIsPushing(true);
+    setPushResult(null);
+    setPushStatus('Starting...');
+    setPushMessages([]);
     setError(null);
 
     try {
       const response = await fetch('/api/git/push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: workingDir, setUpstream: true }),
+        body: JSON.stringify({ path: workingDir }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to push');
+      // Check if it's an SSE response or error JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType?.includes('application/json')) {
+        const data = await response.json();
+        setError(data.error || 'Failed to push');
+        setPushResult({ success: false, error: data.error });
+        setIsPushing(false);
+        return;
       }
-      // Refresh data after push
-      fetchGitData();
+
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'status') {
+                setPushStatus(data.status);
+              } else if (currentEvent === 'tool') {
+                setPushStatus(data.description);
+              } else if (currentEvent === 'message') {
+                setPushMessages(prev => [...prev, data.text]);
+              } else if (currentEvent === 'done') {
+                setPushResult({ success: data.success, error: data.error });
+                if (data.success) {
+                  fetchGitData();
+                }
+              }
+            } catch {
+              // Ignore parse errors
+            }
+            currentEvent = '';
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to push');
+      setPushResult({ success: false, error: 'Connection error' });
     } finally {
       setIsPushing(false);
     }
@@ -478,9 +586,9 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             variant="ghost"
             size="sm"
             onClick={handlePull}
-            disabled={isAnyOperationInProgress || changeCount > 0}
+            disabled={isAnyOperationInProgress}
             className="h-6 gap-1 px-2 text-xs"
-            title={changeCount > 0 ? 'Commit changes before pulling' : 'Pull from remote'}
+            title="Smart pull from remote (handles stashing, rebasing, conflicts)"
           >
             <ArrowDownToLine className={`h-3 w-3 ${isPulling ? 'animate-pulse' : ''}`} />
             {isPulling ? 'Pulling...' : 'Pull'}
@@ -491,7 +599,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             onClick={handlePush}
             disabled={isAnyOperationInProgress}
             className="h-6 gap-1 px-2 text-xs"
-            title="Push to remote"
+            title="Smart push to remote (handles upstream, pull+rebase if needed)"
           >
             <ArrowUpFromLine className={`h-3 w-3 ${isPushing ? 'animate-pulse' : ''}`} />
             {isPushing ? 'Pushing...' : 'Push'}
@@ -671,6 +779,184 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
                   onClick={() => {
                     setMergeResult(null);
                     setMergeStatus('');
+                  }}
+                >
+                  ← Back to changes
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (isPulling || pullResult) ? (
+          <div className="flex-1 flex flex-col p-6">
+            {/* Status header */}
+            <div className={`rounded-lg p-4 mb-4 ${
+              pullResult
+                ? pullResult.success
+                  ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+            }`}>
+              <div className="flex items-center gap-3">
+                {isPulling && (
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <ArrowDownToLine className="h-4 w-4 animate-pulse text-blue-600 dark:text-blue-400" />
+                  </div>
+                )}
+                {pullResult && (
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+                    pullResult.success
+                      ? 'bg-green-100 dark:bg-green-900/40'
+                      : 'bg-red-100 dark:bg-red-900/40'
+                  }`}>
+                    <span className="text-lg">{pullResult.success ? '✓' : '✗'}</span>
+                  </div>
+                )}
+                <div>
+                  <div className={`font-medium ${
+                    pullResult
+                      ? pullResult.success
+                        ? 'text-green-700 dark:text-green-300'
+                        : 'text-red-700 dark:text-red-300'
+                      : 'text-blue-700 dark:text-blue-300'
+                  }`}>
+                    {pullResult
+                      ? pullResult.success
+                        ? 'Pull successful'
+                        : pullResult.error || 'Pull failed'
+                      : 'Pulling changes...'}
+                  </div>
+                  {isPulling && pullStatus && (
+                    <div className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                      {pullStatus}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Messages from Claude */}
+            <div className="flex-1 min-h-0 overflow-auto">
+              {pullMessages.length > 0 ? (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+                  <div className="space-y-3">
+                    {pullMessages.map((msg, i) => (
+                      <div key={i} className={`prose prose-sm dark:prose-invert max-w-none ${i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}`}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                          {msg}
+                        </ReactMarkdown>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : isPulling ? (
+                <div className="flex items-center justify-center h-32 text-sm text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Claude is pulling changes...</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Back button (only when done) */}
+            {pullResult && (
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPullResult(null);
+                    setPullMessages([]);
+                    setPullStatus('');
+                  }}
+                >
+                  ← Back to changes
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (isPushing || pushResult) ? (
+          <div className="flex-1 flex flex-col p-6">
+            {/* Status header */}
+            <div className={`rounded-lg p-4 mb-4 ${
+              pushResult
+                ? pushResult.success
+                  ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+            }`}>
+              <div className="flex items-center gap-3">
+                {isPushing && (
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <ArrowUpFromLine className="h-4 w-4 animate-pulse text-blue-600 dark:text-blue-400" />
+                  </div>
+                )}
+                {pushResult && (
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+                    pushResult.success
+                      ? 'bg-green-100 dark:bg-green-900/40'
+                      : 'bg-red-100 dark:bg-red-900/40'
+                  }`}>
+                    <span className="text-lg">{pushResult.success ? '✓' : '✗'}</span>
+                  </div>
+                )}
+                <div>
+                  <div className={`font-medium ${
+                    pushResult
+                      ? pushResult.success
+                        ? 'text-green-700 dark:text-green-300'
+                        : 'text-red-700 dark:text-red-300'
+                      : 'text-blue-700 dark:text-blue-300'
+                  }`}>
+                    {pushResult
+                      ? pushResult.success
+                        ? 'Push successful'
+                        : pushResult.error || 'Push failed'
+                      : 'Pushing changes...'}
+                  </div>
+                  {isPushing && pushStatus && (
+                    <div className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                      {pushStatus}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Messages from Claude */}
+            <div className="flex-1 min-h-0 overflow-auto">
+              {pushMessages.length > 0 ? (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+                  <div className="space-y-3">
+                    {pushMessages.map((msg, i) => (
+                      <div key={i} className={`prose prose-sm dark:prose-invert max-w-none ${i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}`}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                          {msg}
+                        </ReactMarkdown>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : isPushing ? (
+                <div className="flex items-center justify-center h-32 text-sm text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Claude is pushing changes...</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Back button (only when done) */}
+            {pushResult && (
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPushResult(null);
+                    setPushMessages([]);
+                    setPushStatus('');
                   }}
                 >
                   ← Back to changes
