@@ -28,6 +28,15 @@ export interface ClaudeMetadata {
   pendingMessages?: string[]; // Messages queued by other sessions (send_to_session)
   worktreePath?: string; // If session was created with a worktree, path to worktree
   currentBranch?: string; // Current git branch of workingDir (fetched dynamically)
+
+  // Preview system state (for worktrees with docker-compose.preview.yml)
+  previewStatus?: 'starting' | 'running' | 'error'; // Overall preview status
+  previewError?: string; // Error message if previewStatus is 'error'
+  previewUrl?: string; // Full preview URL (e.g., https://feature-auth-ats-preview.leetlabs.ai)
+  previewProjectName?: string; // Docker compose project name (preview-{sessionId})
+  previewPort?: number; // Allocated external port
+  previewCaddyRouteId?: string; // Caddy route ID for cleanup
+  previewStartedAt?: string; // ISO timestamp
 }
 
 export interface Session {

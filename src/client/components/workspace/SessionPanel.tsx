@@ -113,6 +113,9 @@ export function SessionPanel({
               sessionName={session.name}
               workingDir={session.claudeMetadata?.workingDir}
               worktreePath={session.claudeMetadata?.worktreePath}
+              previewStatus={session.claudeMetadata?.previewStatus}
+              previewError={session.claudeMetadata?.previewError}
+              previewUrl={session.claudeMetadata?.previewUrl}
               state={state}
               actions={actions}
               globalAllowedTools={sessionManager.globalState.globalAllowedTools}

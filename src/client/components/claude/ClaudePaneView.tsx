@@ -1,4 +1,4 @@
-import { Trash2, Circle, ChevronDown, ChevronRight, ListTodo, CheckCircle2, Clock, GitBranch, GitCommitHorizontal, Terminal, FolderOpen, Settings, Shield, ShieldCheck, ShieldOff, FileEdit } from 'lucide-react';
+import { Trash2, Circle, ChevronDown, ChevronRight, ListTodo, CheckCircle2, Clock, GitBranch, GitCommitHorizontal, Terminal, FolderOpen, Settings, Shield, ShieldCheck, ShieldOff, FileEdit, ExternalLink, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -8,7 +8,9 @@ import { ClaudeInputBar } from './ClaudeInputBar';
 import { FileBrowser } from './FileBrowser';
 import { GitPanel } from './GitPanel';
 import { AllowedToolsSettings } from './AllowedToolsSettings';
+import { PreviewPanel } from './PreviewPanel';
 import { ForkSessionDialog } from '../workspace/ForkSessionDialog';
+import { WorkingDirProvider } from '../../contexts/WorkingDirContext';
 import type { SessionState, SessionActions, PermissionMode } from '../../types/sessionState';
 import type { FileAttachment } from '../../types/claude';
 import type { Socket } from 'socket.io-client';
@@ -24,6 +26,9 @@ interface ClaudePaneViewProps {
   sessionName?: string;
   workingDir?: string;
   worktreePath?: string;
+  previewStatus?: 'starting' | 'running' | 'error';
+  previewError?: string;
+  previewUrl?: string;
   state: SessionState;
   actions: SessionActions;
   globalAllowedTools: string[];
@@ -40,6 +45,9 @@ export function ClaudePaneView({
   sessionName,
   workingDir,
   worktreePath,
+  previewStatus,
+  previewError,
+  previewUrl,
   state,
   actions,
   globalAllowedTools,
@@ -54,6 +62,7 @@ export function ClaudePaneView({
   const [showTerminal, setShowTerminal] = useState(false);
   const [showFileBrowser, setShowFileBrowser] = useState(false);
   const [showGitPanel, setShowGitPanel] = useState(false);
+  const [showPreviewPanel, setShowPreviewPanel] = useState(false);
   const [showAllowedTools, setShowAllowedTools] = useState(false);
   const [showPermissionModeMenu, setShowPermissionModeMenu] = useState(false);
   const [showForkDialog, setShowForkDialog] = useState(false);
@@ -215,6 +224,50 @@ export function ClaudePaneView({
                     <Circle className="h-2.5 w-2.5 animate-pulse fill-current text-blue-600 dark:text-blue-400" />
                   )}
                 </button>
+              )}
+              {/* Preview status indicator */}
+              {previewStatus === 'starting' && (
+                <div
+                  className="flex items-center gap-1 rounded-md bg-yellow-100 px-1.5 py-1 text-xs text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
+                  title="Setting up preview environment..."
+                >
+                  <Circle className="h-3 w-3 animate-pulse fill-current" />
+                  <span className="hidden sm:inline">Starting preview...</span>
+                </div>
+              )}
+              {previewStatus === 'error' && (
+                <div
+                  className="flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-1 text-xs text-red-700 dark:bg-red-900 dark:text-red-300"
+                  title={previewError || 'Preview setup failed'}
+                >
+                  <Circle className="h-3 w-3 fill-current" />
+                  <span className="hidden sm:inline">Preview error</span>
+                </div>
+              )}
+              {previewStatus === 'running' && previewUrl && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setShowPreviewPanel(prev => !prev)}
+                    className={`flex items-center gap-1 rounded-md px-1.5 py-1 text-xs ${
+                      showPreviewPanel
+                        ? 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200'
+                        : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800'
+                    }`}
+                    title="Manage preview services"
+                  >
+                    <Server className="h-3 w-3" />
+                    <span className="hidden sm:inline">Preview</span>
+                  </button>
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 rounded-md bg-green-100 px-1.5 py-1 text-xs text-green-700 hover:bg-green-200 dark:bg-green-900 dark:text-green-300 dark:hover:bg-green-800"
+                    title={`Open preview: ${previewUrl}`}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
               )}
             </div>
 
@@ -439,19 +492,21 @@ export function ClaudePaneView({
       )}
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <ClaudeConversationView
-          messages={messages}
-          thinking={thinking}
-          pendingRequest={pendingRequest}
-          onApproveRequest={handleApproveRequest}
-          onApproveAndRememberRequest={handleApproveAndRememberRequest}
-          onApproveAndRememberGlobalRequest={handleApproveAndRememberGlobalRequest}
-          onApproveAndSwitchToAcceptEdits={handleApproveAndSwitchToAcceptEdits}
-          onApproveAndSwitchToBypass={handleApproveAndSwitchToBypass}
-          onDenyRequest={handleDenyRequest}
-          toolResults={toolResults}
-          sessionId={sessionId}
-        />
+        <WorkingDirProvider value={workingDir}>
+          <ClaudeConversationView
+            messages={messages}
+            thinking={thinking}
+            pendingRequest={pendingRequest}
+            onApproveRequest={handleApproveRequest}
+            onApproveAndRememberRequest={handleApproveAndRememberRequest}
+            onApproveAndRememberGlobalRequest={handleApproveAndRememberGlobalRequest}
+            onApproveAndSwitchToAcceptEdits={handleApproveAndSwitchToAcceptEdits}
+            onApproveAndSwitchToBypass={handleApproveAndSwitchToBypass}
+            onDenyRequest={handleDenyRequest}
+            toolResults={toolResults}
+            sessionId={sessionId}
+          />
+        </WorkingDirProvider>
         <ClaudeInputBar
           onSendMessage={handleSendMessage}
           onAbort={handleAbort}
@@ -490,6 +545,12 @@ export function ClaudePaneView({
           sessionId={sessionId}
           isOpen={showTerminal}
           onClose={() => setShowTerminal(false)}
+        />
+        <PreviewPanel
+          sessionId={sessionId}
+          previewUrl={previewUrl}
+          isOpen={showPreviewPanel}
+          onClose={() => setShowPreviewPanel(false)}
         />
       </div>
     </div>

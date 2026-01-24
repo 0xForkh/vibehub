@@ -4,6 +4,7 @@ import { resolve, relative, dirname, basename } from 'path';
 import { promisify } from 'util';
 import { Router, type Router as ExpressRouter , Request, Response } from 'express';
 import { logger as getLogger } from '../../shared/logger.js';
+import { getPreviewManager } from '../preview/index.js';
 import { SessionStore } from '../sessions/SessionStore.js';
 import { broadcastSessionsUpdate } from '../socketServer/socketRegistry.js';
 import { createWorktree, removeWorktree, getMainRepoPath, getCurrentBranch } from '../utils/gitWorktree.js';
@@ -208,6 +209,31 @@ router.delete('/:id', async (req: Request, res: Response) => {
       return;
     }
 
+    // Cleanup preview environment if session has one
+    if (session.claudeMetadata?.previewProjectName) {
+      try {
+        const previewManager = getPreviewManager();
+
+        // Restore preview state from session metadata for cleanup
+        previewManager.restorePreviewState(id, {
+          projectName: session.claudeMetadata.previewProjectName,
+          previewUrl: session.claudeMetadata.previewUrl || '',
+          port: session.claudeMetadata.previewPort || 0,
+          composeFile: '',
+          caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
+          startedAt: session.claudeMetadata.previewStartedAt || '',
+        });
+
+        await previewManager.stopPreview(id);
+        logger.info('Preview environment cleaned up', { sessionId: id });
+      } catch (err) {
+        logger.warn('Failed to cleanup preview environment', {
+          sessionId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     // Handle worktree cleanup for Claude sessions
     if (cleanupWorktree && session.claudeMetadata?.worktreePath) {
       const {worktreePath} = session.claudeMetadata;
@@ -301,12 +327,21 @@ router.post('/claude', async (req: Request, res: Response) => {
       });
     }
 
+    // Check if preview config exists before creating session
+    let hasPreviewConfig = false;
+    if (worktree?.branch) {
+      const previewManager = getPreviewManager();
+      hasPreviewConfig = await previewManager.hasPreviewSupport(expandedWorkingDir);
+    }
+
     const session = await sessionStore.createClaudeSession(
       name,
       {
         workingDir: finalWorkingDir,
         permissionMode: permissionMode || 'default',
         worktreePath,
+        // Set initial preview status if preview config exists
+        ...(hasPreviewConfig && { previewStatus: 'starting' as const }),
       },
       {
         cols: cols || 80,
@@ -314,8 +349,69 @@ router.post('/claude', async (req: Request, res: Response) => {
       }
     );
 
+    // Return session immediately and broadcast
     broadcastSessionsUpdate();
     res.status(201).json({ session });
+
+    // Start preview environment in background if worktree has preview config
+    if (worktree?.branch && hasPreviewConfig) {
+      // Use setImmediate to ensure response is sent before starting preview
+      setImmediate(async () => {
+        try {
+          const previewManager = getPreviewManager();
+
+          logger.info('Starting preview environment in background', {
+            sessionId: session.id,
+          });
+
+          const previewState = await previewManager.startPreview(
+            finalWorkingDir,
+            worktree.branch,
+            session.id,
+          );
+
+          // Update session with preview metadata
+          await sessionStore.updateSession(session.id, {
+            claudeMetadata: {
+              ...session.claudeMetadata,
+              workingDir: finalWorkingDir,
+              previewStatus: 'running',
+              previewUrl: previewState.previewUrl,
+              previewProjectName: previewState.projectName,
+              previewPort: previewState.port,
+              previewCaddyRouteId: previewState.caddyRouteId,
+              previewStartedAt: previewState.startedAt,
+            },
+          });
+
+          logger.info('Preview environment started', {
+            sessionId: session.id,
+            previewUrl: previewState.previewUrl,
+          });
+
+          // Broadcast update so frontend sees the preview is ready
+          broadcastSessionsUpdate();
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          logger.error('Failed to start preview environment', { error, sessionId: session.id });
+
+          // Update session with error status
+          try {
+            await sessionStore.updateSession(session.id, {
+              claudeMetadata: {
+                ...session.claudeMetadata,
+                workingDir: finalWorkingDir,
+                previewStatus: 'error',
+                previewError: error,
+              },
+            });
+            broadcastSessionsUpdate();
+          } catch (updateErr) {
+            logger.error('Failed to update session with preview error', { updateErr });
+          }
+        }
+      });
+    }
   } catch (err) {
     logger.error('Failed to create Claude session', { err });
     res.status(500).json({ error: 'Failed to create Claude session' });
@@ -401,6 +497,149 @@ router.get('/files/:sessionId/*', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Failed to serve file', { err });
     res.status(500).json({ error: 'Failed to serve file' });
+  }
+});
+
+// =============================================================================
+// Preview Management Routes
+// =============================================================================
+
+/**
+ * GET /api/preview/:sessionId/status - Get preview status
+ */
+router.get('/preview/:sessionId/status', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.previewProjectName) {
+      res.status(400).json({ error: 'Session has no preview environment' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Restore state if needed (e.g., after server restart)
+    if (!previewManager.getPreviewState(sessionId)) {
+      previewManager.restorePreviewState(sessionId, {
+        projectName: session.claudeMetadata.previewProjectName,
+        previewUrl: session.claudeMetadata.previewUrl || '',
+        port: session.claudeMetadata.previewPort || 0,
+        composeFile: '',
+        caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
+        startedAt: session.claudeMetadata.previewStartedAt || '',
+      });
+    }
+
+    const status = await previewManager.getStatus(sessionId);
+    res.json({
+      ...status,
+      previewUrl: session.claudeMetadata.previewUrl,
+    });
+  } catch (err) {
+    logger.error('Failed to get preview status', { err });
+    res.status(500).json({ error: 'Failed to get preview status' });
+  }
+});
+
+/**
+ * GET /api/preview/:sessionId/logs - Get logs for preview environment
+ * Query params:
+ *   - service: Optional service name to filter logs
+ *   - lines: Number of lines (default: 100)
+ */
+router.get('/preview/:sessionId/logs', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const service = req.query.service as string | undefined;
+    const lines = parseInt(req.query.lines as string, 10) || 100;
+
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.previewProjectName) {
+      res.status(400).json({ error: 'Session has no preview environment' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Restore state if needed
+    if (!previewManager.getPreviewState(sessionId)) {
+      previewManager.restorePreviewState(sessionId, {
+        projectName: session.claudeMetadata.previewProjectName,
+        previewUrl: session.claudeMetadata.previewUrl || '',
+        port: session.claudeMetadata.previewPort || 0,
+        composeFile: '',
+        caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
+        startedAt: session.claudeMetadata.previewStartedAt || '',
+      });
+    }
+
+    const logs = await previewManager.getLogs(sessionId, service, lines);
+    res.json({ logs });
+  } catch (err) {
+    logger.error('Failed to get preview logs', { err });
+    res.status(500).json({ error: 'Failed to get preview logs' });
+  }
+});
+
+/**
+ * POST /api/preview/:sessionId/restart - Restart the entire preview environment
+ */
+router.post('/preview/:sessionId/restart', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.previewProjectName || !session.claudeMetadata?.worktreePath) {
+      res.status(400).json({ error: 'Session has no preview environment' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Restart the preview
+    const previewState = await previewManager.restartPreview(
+      sessionId,
+      session.claudeMetadata.worktreePath,
+      session.claudeMetadata.currentBranch || 'main',
+    );
+
+    // Update session metadata
+    await sessionStore.updateSession(sessionId, {
+      claudeMetadata: {
+        ...session.claudeMetadata,
+        previewUrl: previewState.previewUrl,
+        previewProjectName: previewState.projectName,
+        previewPort: previewState.port,
+        previewCaddyRouteId: previewState.caddyRouteId,
+        previewStartedAt: previewState.startedAt,
+      },
+    });
+
+    res.json({
+      success: true,
+      previewUrl: previewState.previewUrl,
+    });
+  } catch (err) {
+    logger.error('Failed to restart preview', { err });
+    res.status(500).json({ error: 'Failed to restart preview' });
   }
 });
 

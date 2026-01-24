@@ -20,6 +20,11 @@ export interface Session {
     claudeSessionId?: string;
     worktreePath?: string; // If session was created with a git worktree
     currentBranch?: string; // Current git branch
+    previewStatus?: 'starting' | 'running' | 'error'; // Overall preview status
+    previewError?: string; // Error message if previewStatus is 'error'
+    previewUrl?: string; // Preview URL for worktree sessions
+    previewProjectName?: string; // Docker compose project name
+    previewPort?: number; // Allocated external port
   };
   status: 'active' | 'detached';
 }

@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { logger as getLogger } from '../../../shared/logger.js';
+import { getPreviewManager } from '../../preview/index.js';
 import { SessionStore } from '../../sessions/SessionStore.js';
 import { broadcastSessionsUpdate } from '../../socketServer/socketRegistry.js';
 import { createWorktree } from '../../utils/gitWorktree.js';
@@ -74,7 +75,7 @@ export function createSessionToolsServer(context: SessionToolsContext): McpSdkSe
             });
           }
 
-          // Create the session in the database
+          // Create the session in the database first (we need the ID for preview)
           const session = await sessionStore.createClaudeSession(
             args.name,
             {
@@ -86,6 +87,51 @@ export function createSessionToolsServer(context: SessionToolsContext): McpSdkSe
           );
 
           logger.info('Session created via tool', { sessionId: session.id, name: args.name });
+
+          // Start preview environment if worktree has docker-compose.preview.yml
+          let previewUrl: string | undefined;
+          if (args.worktree) {
+            try {
+              const previewManager = getPreviewManager();
+              const hasPreview = await previewManager.hasPreviewSupport(args.workingDir);
+
+              if (hasPreview) {
+                logger.info('Starting preview environment', {
+                  sessionId: session.id,
+                });
+
+                const previewState = await previewManager.startPreview(
+                  finalWorkingDir,
+                  args.worktree.branch,
+                  session.id,
+                );
+
+                previewUrl = previewState.previewUrl;
+
+                // Update session with preview metadata
+                const existingMetadata = session.claudeMetadata || { workingDir: finalWorkingDir };
+                await sessionStore.updateSession(session.id, {
+                  claudeMetadata: {
+                    ...existingMetadata,
+                    previewUrl: previewState.previewUrl,
+                    previewProjectName: previewState.projectName,
+                    previewPort: previewState.port,
+                    previewCaddyRouteId: previewState.caddyRouteId,
+                    previewStartedAt: previewState.startedAt,
+                  },
+                });
+
+                logger.info('Preview environment started', {
+                  sessionId: session.id,
+                  previewUrl: previewState.previewUrl,
+                });
+              }
+            } catch (err) {
+              const error = err instanceof Error ? err.message : String(err);
+              logger.error('Failed to start preview environment', { error, sessionId: session.id });
+              // Don't fail session creation, just log the error
+            }
+          }
 
           // Broadcast to connected clients
           broadcastSessionsUpdate();
@@ -106,6 +152,7 @@ export function createSessionToolsServer(context: SessionToolsContext): McpSdkSe
                 workingDir: finalWorkingDir,
                 hasWorktree: !!args.worktree,
                 hasInitialMessage: !!args.initialMessage,
+                previewUrl,
               }),
             }],
           };
