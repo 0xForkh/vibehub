@@ -1,4 +1,4 @@
-import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal, GitMerge, AlertTriangle, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import { GitBranch, RefreshCw, FileText, FilePlus, FileMinus, FileQuestion, Clock, User, ChevronRight, ChevronDown, GitCommitHorizontal, GitMerge, AlertTriangle, ArrowDownToLine, ArrowUpFromLine, GitPullRequestArrow } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { DiffView, DiffModeEnum } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
@@ -123,6 +123,12 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
   const [pushStatus, setPushStatus] = useState<string>('');
   const [pushMessages, setPushMessages] = useState<string[]>([]);
   const [pushResult, setPushResult] = useState<{ success: boolean; error?: string } | null>(null);
+
+  // Worktree sync state (pull from main branch)
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<string>('');
+  const [syncMessages, setSyncMessages] = useState<string[]>([]);
+  const [syncResult, setSyncResult] = useState<{ success: boolean; error?: string } | null>(null);
 
   const fetchGitData = useCallback(async () => {
     if (!workingDir) return;
@@ -552,9 +558,86 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
     }
   }, [workingDir, isPushing, fetchGitData]);
 
+  const handleSync = useCallback(async () => {
+    if (!workingDir || isSyncing || !worktreeInfo?.isWorktree) return;
+
+    setIsSyncing(true);
+    setSyncResult(null);
+    setSyncStatus('Starting...');
+    setSyncMessages([]);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/git/sync-worktree', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: workingDir }),
+      });
+
+      // Check if it's an SSE response or error JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType?.includes('application/json')) {
+        const data = await response.json();
+        setError(data.error || 'Failed to sync');
+        setSyncResult({ success: false, error: data.error });
+        setIsSyncing(false);
+        return;
+      }
+
+      // Handle SSE stream
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('No response body');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        let currentEvent = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith('data: ') && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'status') {
+                setSyncStatus(data.status);
+              } else if (currentEvent === 'tool') {
+                setSyncStatus(data.description);
+              } else if (currentEvent === 'message') {
+                setSyncMessages(prev => [...prev, data.text]);
+              } else if (currentEvent === 'done') {
+                setSyncResult({ success: data.success, error: data.error });
+                if (data.success) {
+                  fetchGitData();
+                }
+              }
+            } catch {
+              // Ignore parse errors
+            }
+            currentEvent = '';
+          }
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to sync');
+      setSyncResult({ success: false, error: 'Connection error' });
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [workingDir, isSyncing, worktreeInfo, fetchGitData]);
+
   const changeCount = status ? status.staged.length + status.unstaged.length : 0;
   const canMerge = worktreeInfo?.isWorktree && !worktreeInfo?.hasUncommittedChanges;
-  const isAnyOperationInProgress = isLoading || isCommitting || isMerging || isFetching || isPulling || isPushing;
+  const isAnyOperationInProgress = isLoading || isCommitting || isMerging || isFetching || isPulling || isPushing || isSyncing;
 
   return (
     <ModalPanel
@@ -619,18 +702,30 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             </Button>
           )}
           {worktreeInfo?.isWorktree && (
-            <div className="relative">
+            <>
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setShowMergeConfirm(true)}
-                disabled={isAnyOperationInProgress || !canMerge}
+                onClick={handleSync}
+                disabled={isAnyOperationInProgress}
                 className="h-6 gap-1 px-2 text-xs"
-                title={canMerge ? `Merge ${worktreeInfo.currentBranch} into ${worktreeInfo.defaultBranch}` : 'Commit changes before merging'}
+                title={`Sync: pull ${worktreeInfo.defaultBranch} into ${worktreeInfo.currentBranch}`}
               >
-                <GitMerge className={`h-3 w-3 ${isMerging ? 'animate-pulse' : ''}`} />
-                {isMerging ? 'Merging...' : 'Merge'}
+                <GitPullRequestArrow className={`h-3 w-3 ${isSyncing ? 'animate-pulse' : ''}`} />
+                {isSyncing ? 'Syncing...' : 'Sync'}
               </Button>
+              <div className="relative">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowMergeConfirm(true)}
+                  disabled={isAnyOperationInProgress || !canMerge}
+                  className="h-6 gap-1 px-2 text-xs"
+                  title={canMerge ? `Merge ${worktreeInfo.currentBranch} into ${worktreeInfo.defaultBranch}` : 'Commit changes before merging'}
+                >
+                  <GitMerge className={`h-3 w-3 ${isMerging ? 'animate-pulse' : ''}`} />
+                  {isMerging ? 'Merging...' : 'Merge'}
+                </Button>
               {showMergeConfirm && (
                 <>
                   <div className="fixed inset-0 z-40" onClick={() => setShowMergeConfirm(false)} />
@@ -681,7 +776,8 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
                   </div>
                 </>
               )}
-            </div>
+              </div>
+            </>
           )}
           <Button
             variant="ghost"
@@ -698,8 +794,97 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
     >
       {/* Content */}
       <div className="flex-1 flex min-h-0 bg-white dark:bg-gray-900" style={{ maxHeight: '70vh' }}>
-        {/* Dedicated Merge View - Full Width */}
-        {(isMerging || mergeResult) ? (
+        {/* Dedicated Sync View - Full Width */}
+        {(isSyncing || syncResult) ? (
+          <div className="flex-1 flex flex-col p-6">
+            {/* Status header */}
+            <div className={`rounded-lg p-4 mb-4 ${
+              syncResult
+                ? syncResult.success
+                  ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800'
+                : 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+            }`}>
+              <div className="flex items-center gap-3">
+                {isSyncing && (
+                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900/40">
+                    <GitPullRequestArrow className="h-4 w-4 animate-pulse text-blue-600 dark:text-blue-400" />
+                  </div>
+                )}
+                {syncResult && (
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
+                    syncResult.success
+                      ? 'bg-green-100 dark:bg-green-900/40'
+                      : 'bg-red-100 dark:bg-red-900/40'
+                  }`}>
+                    <span className="text-lg">{syncResult.success ? '✓' : '✗'}</span>
+                  </div>
+                )}
+                <div>
+                  <div className={`font-medium ${
+                    syncResult
+                      ? syncResult.success
+                        ? 'text-green-700 dark:text-green-300'
+                        : 'text-red-700 dark:text-red-300'
+                      : 'text-blue-700 dark:text-blue-300'
+                  }`}>
+                    {syncResult
+                      ? syncResult.success
+                        ? 'Sync successful'
+                        : syncResult.error || 'Sync failed'
+                      : 'Syncing with main branch...'}
+                  </div>
+                  {isSyncing && syncStatus && (
+                    <div className="text-sm text-blue-600 dark:text-blue-400 mt-1">
+                      {syncStatus}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Messages from Claude */}
+            <div className="flex-1 min-h-0 overflow-auto">
+              {syncMessages.length > 0 ? (
+                <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 p-4">
+                  <div className="space-y-3">
+                    {syncMessages.map((msg, i) => (
+                      <div key={i} className={`prose prose-sm dark:prose-invert max-w-none ${i > 0 ? 'pt-3 border-t border-gray-200 dark:border-gray-700' : ''}`}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
+                          {msg}
+                        </ReactMarkdown>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : isSyncing ? (
+                <div className="flex items-center justify-center h-32 text-sm text-gray-500">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Claude is syncing with main branch...</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Back button (only when done) */}
+            {syncResult && (
+              <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSyncResult(null);
+                    setSyncMessages([]);
+                    setSyncStatus('');
+                  }}
+                >
+                  ← Back to changes
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : (isMerging || mergeResult) ? (
           <div className="flex-1 flex flex-col p-6">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${

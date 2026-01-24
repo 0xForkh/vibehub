@@ -872,4 +872,120 @@ After completing, briefly summarize what happened (e.g., "Pushed 2 commits to or
   res.end();
 });
 
+/**
+ * POST /api/git/sync-worktree - Sync worktree by pulling changes from the main branch (SSE stream)
+ * Body:
+ *   - path: worktree directory path (required)
+ *
+ * Claude will fetch, then merge/rebase the default branch into the worktree branch.
+ */
+router.post('/sync-worktree', async (req: Request, res: Response) => {
+  const { path: dirPath } = req.body;
+
+  if (!dirPath) {
+    res.status(400).json({ error: 'Path is required' });
+    return;
+  }
+
+  // Validate it's a worktree
+  const isWt = await isWorktree(dirPath);
+  if (!isWt) {
+    res.status(400).json({ error: 'Path is not a git worktree' });
+    return;
+  }
+
+  const defaultBranch = await getDefaultBranch(dirPath);
+  const currentBranch = await getCurrentBranch(dirPath);
+
+  // Set up SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+      (res as unknown as { flush: () => void }).flush();
+    }
+  };
+
+  logger.info('Starting Claude sync-worktree', { dirPath, defaultBranch, currentBranch });
+  sendEvent('status', { status: 'Starting sync process...' });
+
+  let error: string | null = null;
+
+  const agent = new ClaudeAgentService({
+    workingDir: dirPath,
+    permissionMode: 'acceptEdits',
+    onMessage: (message) => {
+      if (message.type === 'assistant' && typeof message.message?.content === 'string') {
+        sendEvent('message', { text: message.message.content });
+      } else if (message.type === 'assistant' && Array.isArray(message.message?.content)) {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) {
+            sendEvent('message', { text: block.text });
+          }
+        }
+      }
+    },
+    onPermissionRequest: async (toolName, input) => {
+      let description = toolName;
+      if (toolName === 'Bash' && typeof input.command === 'string') {
+        const cmd = input.command as string;
+        if (cmd.includes('git fetch')) {
+          description = 'Fetching from remote...';
+        } else if (cmd.includes('git merge')) {
+          description = 'Merging main branch...';
+        } else if (cmd.includes('git rebase')) {
+          description = 'Rebasing on main branch...';
+        } else if (cmd.includes('git stash')) {
+          description = 'Stashing changes...';
+        } else if (cmd.includes('git status') || cmd.includes('git diff')) {
+          description = 'Checking status...';
+        } else if (cmd.includes('git add')) {
+          description = 'Staging files...';
+        } else if (cmd.includes('git commit')) {
+          description = 'Committing...';
+        } else {
+          description = `Running: ${cmd.slice(0, 50)}${cmd.length > 50 ? '...' : ''}`;
+        }
+      }
+      sendEvent('tool', { tool: toolName, description });
+      return { behavior: 'allow' as const, updatedInput: input };
+    },
+    onError: (err) => {
+      error = err.message;
+      logger.error('Claude sync-worktree error', { error: err.message });
+    },
+    onComplete: () => {
+      logger.info('Claude sync-worktree completed');
+    },
+  });
+
+  const prompt = `Sync this worktree branch "${currentBranch}" with the latest changes from "${defaultBranch}" in ${dirPath}.
+
+IMPORTANT: Stay in the current working directory. Do not change to a different directory.
+
+Follow these steps:
+1. First, fetch the latest changes from origin
+2. If there are uncommitted changes, stash them first
+3. Merge or rebase origin/${defaultBranch} into the current branch (prefer rebase for cleaner history)
+4. If there are conflicts, resolve them intelligently by examining the files
+5. If changes were stashed, pop the stash and resolve any conflicts
+
+After completing, briefly summarize what happened (e.g., "Synced with main: rebased 2 commits" or "Already up to date with main").`;
+
+  try {
+    await agent.start(prompt);
+    sendEvent('done', { success: !error, error: error || undefined });
+  } catch (err) {
+    logger.error('Failed to run Claude sync-worktree', { err });
+    sendEvent('done', { success: false, error: 'Failed to run Claude sync-worktree' });
+  }
+
+  res.end();
+});
+
 export { router as gitRouter };
