@@ -144,6 +144,277 @@ router.get('/directories', async (req: Request, res: Response) => {
   }
 });
 
+// =============================================================================
+// Preview Management Routes
+// IMPORTANT: These must be defined BEFORE /:id routes to avoid "preview" being
+// matched as a session ID
+// =============================================================================
+
+/**
+ * GET /api/sessions/preview/:sessionId/status - Get preview status
+ */
+router.get('/preview/:sessionId/status', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.previewProjectName) {
+      res.status(400).json({ error: 'Session has no preview environment' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Restore state if needed (e.g., after server restart)
+    if (!previewManager.getPreviewState(sessionId)) {
+      previewManager.restorePreviewState(sessionId, {
+        projectName: session.claudeMetadata.previewProjectName,
+        previewUrl: session.claudeMetadata.previewUrl || '',
+        port: session.claudeMetadata.previewPort || 0,
+        composeFile: '',
+        caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
+        startedAt: session.claudeMetadata.previewStartedAt || '',
+      });
+    }
+
+    const status = await previewManager.getStatus(sessionId);
+    res.json({
+      ...status,
+      previewUrl: session.claudeMetadata.previewUrl,
+    });
+  } catch (err) {
+    logger.error('Failed to get preview status', { err });
+    res.status(500).json({ error: 'Failed to get preview status' });
+  }
+});
+
+/**
+ * GET /api/sessions/preview/:sessionId/logs - Get logs for preview environment
+ * Query params:
+ *   - service: Optional service name to filter logs
+ *   - lines: Number of lines (default: 100)
+ */
+router.get('/preview/:sessionId/logs', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+    const service = req.query.service as string | undefined;
+    const lines = parseInt(req.query.lines as string, 10) || 100;
+
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.previewProjectName) {
+      res.status(400).json({ error: 'Session has no preview environment' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Restore state if needed
+    if (!previewManager.getPreviewState(sessionId)) {
+      previewManager.restorePreviewState(sessionId, {
+        projectName: session.claudeMetadata.previewProjectName,
+        previewUrl: session.claudeMetadata.previewUrl || '',
+        port: session.claudeMetadata.previewPort || 0,
+        composeFile: '',
+        caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
+        startedAt: session.claudeMetadata.previewStartedAt || '',
+      });
+    }
+
+    const logs = await previewManager.getLogs(sessionId, service, lines);
+    res.json({ logs });
+  } catch (err) {
+    logger.error('Failed to get preview logs', { err });
+    res.status(500).json({ error: 'Failed to get preview logs' });
+  }
+});
+
+/**
+ * POST /api/sessions/preview/:sessionId/restart - Restart the entire preview environment
+ */
+router.post('/preview/:sessionId/restart', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.previewProjectName || !session.claudeMetadata?.worktreePath) {
+      res.status(400).json({ error: 'Session has no preview environment' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Get the current branch from git (don't rely on session metadata which may be stale)
+    const branch = await getCurrentBranch(session.claudeMetadata.worktreePath) || 'main';
+
+    // Restart the preview
+    const previewState = await previewManager.restartPreview(
+      sessionId,
+      session.claudeMetadata.worktreePath,
+      branch,
+    );
+
+    // Update session metadata
+    await sessionStore.updateSession(sessionId, {
+      claudeMetadata: {
+        ...session.claudeMetadata,
+        previewUrl: previewState.previewUrl,
+        previewProjectName: previewState.projectName,
+        previewPort: previewState.port,
+        previewCaddyRouteId: previewState.caddyRouteId,
+        previewStartedAt: previewState.startedAt,
+      },
+    });
+
+    res.json({
+      success: true,
+      previewUrl: previewState.previewUrl,
+    });
+  } catch (err) {
+    logger.error('Failed to restart preview', { err });
+    res.status(500).json({ error: 'Failed to restart preview' });
+  }
+});
+
+/**
+ * POST /api/sessions/preview/:sessionId/retry - Retry starting preview (works even after failure)
+ * This is different from restart - it can start a preview that failed initially
+ */
+router.post('/preview/:sessionId/retry', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await sessionStore.getSession(sessionId);
+
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    if (!session.claudeMetadata?.worktreePath) {
+      res.status(400).json({ error: 'Session has no worktree path - preview requires a worktree' });
+      return;
+    }
+
+    const previewManager = getPreviewManager();
+
+    // Check if preview config exists
+    const hasPreviewConfig = await previewManager.hasPreviewSupport(
+      dirname(dirname(session.claudeMetadata.worktreePath))
+    );
+
+    if (!hasPreviewConfig) {
+      res.status(400).json({
+        error: 'No preview config found. Run the "Initialize Preview" skill to create .vibehub/docker-compose.yml',
+      });
+      return;
+    }
+
+    // Update status to starting
+    await sessionStore.updateSession(sessionId, {
+      claudeMetadata: {
+        ...session.claudeMetadata,
+        previewStatus: 'starting',
+        previewError: undefined,
+      },
+    });
+    broadcastSessionsUpdate();
+
+    // Return immediately
+    res.json({ success: true, status: 'starting' });
+
+    // Start preview in background
+    setImmediate(async () => {
+      try {
+        // Stop any existing preview first
+        if (session.claudeMetadata?.previewProjectName) {
+          previewManager.restorePreviewState(sessionId, {
+            projectName: session.claudeMetadata.previewProjectName,
+            previewUrl: session.claudeMetadata.previewUrl || '',
+            port: session.claudeMetadata.previewPort || 0,
+            composeFile: '',
+            caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
+            startedAt: session.claudeMetadata.previewStartedAt || '',
+          });
+          await previewManager.stopPreview(sessionId);
+        }
+
+        // Get the current branch from git (don't rely on session metadata which may be stale)
+        const branch = await getCurrentBranch(session.claudeMetadata!.worktreePath!) || 'main';
+
+        const previewState = await previewManager.startPreview(
+          session.claudeMetadata!.worktreePath!,
+          branch,
+          sessionId,
+        );
+
+        // Update session with success
+        await sessionStore.updateSession(sessionId, {
+          claudeMetadata: {
+            ...session.claudeMetadata,
+            workingDir: session.claudeMetadata!.workingDir!, // Ensure workingDir is set
+            previewStatus: 'running',
+            previewError: undefined,
+            previewUrl: previewState.previewUrl,
+            previewProjectName: previewState.projectName,
+            previewPort: previewState.port,
+            previewCaddyRouteId: previewState.caddyRouteId,
+            previewStartedAt: previewState.startedAt,
+          },
+        });
+
+        logger.info('Preview environment started via retry', {
+          sessionId,
+          previewUrl: previewState.previewUrl,
+        });
+
+        broadcastSessionsUpdate();
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        logger.error('Failed to start preview via retry', { error, sessionId });
+
+        // Update session with error
+        try {
+          await sessionStore.updateSession(sessionId, {
+            claudeMetadata: {
+              ...session.claudeMetadata,
+              workingDir: session.claudeMetadata!.workingDir!, // Ensure workingDir is set
+              previewStatus: 'error',
+              previewError: error,
+            },
+          });
+          broadcastSessionsUpdate();
+        } catch (updateErr) {
+          logger.error('Failed to update session with preview error', { updateErr });
+        }
+      }
+    });
+  } catch (err) {
+    logger.error('Failed to retry preview', { err });
+    res.status(500).json({ error: 'Failed to retry preview' });
+  }
+});
+
+// =============================================================================
+// Session CRUD Routes (/:id patterns must come AFTER specific routes)
+// =============================================================================
+
 /**
  * GET /api/sessions/:id - Get a specific session
  */
@@ -196,11 +467,13 @@ router.put('/:id', async (req: Request, res: Response) => {
  * DELETE /api/sessions/:id - Delete a session
  * Query params:
  *   - cleanupWorktree: 'true' to also remove the git worktree (if session has one)
+ *   - deleteBranch: 'true' to also delete the git branch (only if cleanupWorktree is true)
  */
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const cleanupWorktree = req.query.cleanupWorktree === 'true';
+    const deleteBranch = req.query.deleteBranch === 'true';
 
     // Get session to check for worktree before deleting
     const session = await sessionStore.getSession(id);
@@ -240,7 +513,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
       const mainRepoPath = await getMainRepoPath(worktreePath);
 
       if (mainRepoPath) {
-        const result = await removeWorktree(mainRepoPath, worktreePath, true);
+        // Pass deleteBranch to removeWorktree (4th parameter)
+        const result = await removeWorktree(mainRepoPath, worktreePath, true, deleteBranch);
         if (!result.success) {
           logger.warn('Failed to cleanup worktree', {
             sessionId: id,
@@ -248,7 +522,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
             error: result.error,
           });
         } else {
-          logger.info('Worktree cleaned up', { sessionId: id, worktreePath });
+          logger.info('Worktree cleaned up', { sessionId: id, worktreePath, deleteBranch });
         }
       }
     }
@@ -497,149 +771,6 @@ router.get('/files/:sessionId/*', async (req: Request, res: Response) => {
   } catch (err) {
     logger.error('Failed to serve file', { err });
     res.status(500).json({ error: 'Failed to serve file' });
-  }
-});
-
-// =============================================================================
-// Preview Management Routes
-// =============================================================================
-
-/**
- * GET /api/preview/:sessionId/status - Get preview status
- */
-router.get('/preview/:sessionId/status', async (req: Request, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-    const session = await sessionStore.getSession(sessionId);
-
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
-    }
-
-    if (!session.claudeMetadata?.previewProjectName) {
-      res.status(400).json({ error: 'Session has no preview environment' });
-      return;
-    }
-
-    const previewManager = getPreviewManager();
-
-    // Restore state if needed (e.g., after server restart)
-    if (!previewManager.getPreviewState(sessionId)) {
-      previewManager.restorePreviewState(sessionId, {
-        projectName: session.claudeMetadata.previewProjectName,
-        previewUrl: session.claudeMetadata.previewUrl || '',
-        port: session.claudeMetadata.previewPort || 0,
-        composeFile: '',
-        caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
-        startedAt: session.claudeMetadata.previewStartedAt || '',
-      });
-    }
-
-    const status = await previewManager.getStatus(sessionId);
-    res.json({
-      ...status,
-      previewUrl: session.claudeMetadata.previewUrl,
-    });
-  } catch (err) {
-    logger.error('Failed to get preview status', { err });
-    res.status(500).json({ error: 'Failed to get preview status' });
-  }
-});
-
-/**
- * GET /api/preview/:sessionId/logs - Get logs for preview environment
- * Query params:
- *   - service: Optional service name to filter logs
- *   - lines: Number of lines (default: 100)
- */
-router.get('/preview/:sessionId/logs', async (req: Request, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-    const service = req.query.service as string | undefined;
-    const lines = parseInt(req.query.lines as string, 10) || 100;
-
-    const session = await sessionStore.getSession(sessionId);
-
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
-    }
-
-    if (!session.claudeMetadata?.previewProjectName) {
-      res.status(400).json({ error: 'Session has no preview environment' });
-      return;
-    }
-
-    const previewManager = getPreviewManager();
-
-    // Restore state if needed
-    if (!previewManager.getPreviewState(sessionId)) {
-      previewManager.restorePreviewState(sessionId, {
-        projectName: session.claudeMetadata.previewProjectName,
-        previewUrl: session.claudeMetadata.previewUrl || '',
-        port: session.claudeMetadata.previewPort || 0,
-        composeFile: '',
-        caddyRouteId: session.claudeMetadata.previewCaddyRouteId,
-        startedAt: session.claudeMetadata.previewStartedAt || '',
-      });
-    }
-
-    const logs = await previewManager.getLogs(sessionId, service, lines);
-    res.json({ logs });
-  } catch (err) {
-    logger.error('Failed to get preview logs', { err });
-    res.status(500).json({ error: 'Failed to get preview logs' });
-  }
-});
-
-/**
- * POST /api/preview/:sessionId/restart - Restart the entire preview environment
- */
-router.post('/preview/:sessionId/restart', async (req: Request, res: Response) => {
-  try {
-    const { sessionId } = req.params;
-
-    const session = await sessionStore.getSession(sessionId);
-
-    if (!session) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
-    }
-
-    if (!session.claudeMetadata?.previewProjectName || !session.claudeMetadata?.worktreePath) {
-      res.status(400).json({ error: 'Session has no preview environment' });
-      return;
-    }
-
-    const previewManager = getPreviewManager();
-
-    // Restart the preview
-    const previewState = await previewManager.restartPreview(
-      sessionId,
-      session.claudeMetadata.worktreePath,
-      session.claudeMetadata.currentBranch || 'main',
-    );
-
-    // Update session metadata
-    await sessionStore.updateSession(sessionId, {
-      claudeMetadata: {
-        ...session.claudeMetadata,
-        previewUrl: previewState.previewUrl,
-        previewProjectName: previewState.projectName,
-        previewPort: previewState.port,
-        previewCaddyRouteId: previewState.caddyRouteId,
-        previewStartedAt: previewState.startedAt,
-      },
-    });
-
-    res.json({
-      success: true,
-      previewUrl: previewState.previewUrl,
-    });
-  } catch (err) {
-    logger.error('Failed to restart preview', { err });
-    res.status(500).json({ error: 'Failed to restart preview' });
   }
 });
 

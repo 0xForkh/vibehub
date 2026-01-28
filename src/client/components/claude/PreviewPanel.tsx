@@ -42,7 +42,7 @@ export function PreviewPanel({
   const fetchStatus = async () => {
     setLoading(prev => ({ ...prev, status: true }));
     try {
-      const response = await api.get(`/api/preview/${sessionId}/status`);
+      const response = await api.get(`/api/sessions/preview/${sessionId}/status`);
       setStatus(response.data);
     } catch (err) {
       console.error('Failed to fetch status:', err);
@@ -55,8 +55,8 @@ export function PreviewPanel({
     setLoading(prev => ({ ...prev, logs: true }));
     try {
       const url = serviceName
-        ? `/api/preview/${sessionId}/logs?service=${encodeURIComponent(serviceName)}`
-        : `/api/preview/${sessionId}/logs`;
+        ? `/api/sessions/preview/${sessionId}/logs?service=${encodeURIComponent(serviceName)}`
+        : `/api/sessions/preview/${sessionId}/logs`;
       const response = await api.get(url);
       setLogs(response.data.logs || '');
     } catch (err) {
@@ -69,7 +69,7 @@ export function PreviewPanel({
   const restartPreview = async () => {
     setLoading(prev => ({ ...prev, restart: true }));
     try {
-      await api.post(`/api/preview/${sessionId}/restart`);
+      await api.post(`/api/sessions/preview/${sessionId}/restart`);
       // Refresh status and iframe
       await fetchStatus();
       refreshIframe();
