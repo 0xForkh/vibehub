@@ -22,14 +22,12 @@ const prodFormat = printf(({ level, message, timestamp: _ts, label: lbl, ...meta
   if (claudeSessionId) parts.push(`claude=${String(claudeSessionId).slice(0, 8)}`);
   if (type) parts.push(`type=${type}`);
 
-  // Add remaining metadata if any (but keep it compact)
+  // Add remaining metadata if any
   const restKeys = Object.keys(rest);
   if (restKeys.length > 0) {
     const compactRest = restKeys.map(k => {
       const v = rest[k];
-      // Truncate long values
-      const val = typeof v === 'string' && v.length > 50 ? `${v.slice(0, 47)}...` : v;
-      return `${k}=${typeof val === 'object' ? JSON.stringify(val) : val}`;
+      return `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`;
     }).join(' ');
     parts.push(compactRest);
   }

@@ -1,0 +1,25 @@
+# Vibehub Systemd Service - Example Configuration
+# Copy this file (don't symlink) to /etc/systemd/system/vibehub.service
+# and customize the environment variables for your host.
+#
+# After copying:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable vibehub
+#   sudo systemctl start vibehub
+
+[Unit]
+Description=Vibehub - IDE for Claude Sessions
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/vibehub/start.sh
+Environment=NODE_ENV=production
+# Set your preview domain for Caddy routing (e.g., orqen.ai, example.com)
+# Preview URLs will be like: branch-project.VIBEHUB_PREVIEW_DOMAIN
+#Environment=VIBEHUB_PREVIEW_DOMAIN=example.com
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
