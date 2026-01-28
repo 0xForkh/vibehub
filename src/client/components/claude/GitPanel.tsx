@@ -796,7 +796,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
       <div className="flex-1 flex min-h-0 bg-white dark:bg-gray-900" style={{ maxHeight: '70vh' }}>
         {/* Dedicated Sync View - Full Width */}
         {(isSyncing || syncResult) ? (
-          <div className="flex-1 flex flex-col p-6">
+          <div className="flex-1 flex flex-col p-6 text-gray-900 dark:text-gray-100">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${
               syncResult
@@ -885,7 +885,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             )}
           </div>
         ) : (isMerging || mergeResult) ? (
-          <div className="flex-1 flex flex-col p-6">
+          <div className="flex-1 flex flex-col p-6 text-gray-900 dark:text-gray-100">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${
               mergeResult
@@ -972,7 +972,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             )}
           </div>
         ) : (isPulling || pullResult) ? (
-          <div className="flex-1 flex flex-col p-6">
+          <div className="flex-1 flex flex-col p-6 text-gray-900 dark:text-gray-100">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${
               pullResult
@@ -1061,7 +1061,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             )}
           </div>
         ) : (isPushing || pushResult) ? (
-          <div className="flex-1 flex flex-col p-6">
+          <div className="flex-1 flex flex-col p-6 text-gray-900 dark:text-gray-100">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${
               pushResult
@@ -1150,7 +1150,7 @@ export function GitPanel({ workingDir, isOpen, onClose, onWorktreeMerged }: GitP
             )}
           </div>
         ) : (isCommitting || commitResult) ? (
-          <div className="flex-1 flex flex-col p-6">
+          <div className="flex-1 flex flex-col p-6 text-gray-900 dark:text-gray-100">
             {/* Status header */}
             <div className={`rounded-lg p-4 mb-4 ${
               commitResult
