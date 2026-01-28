@@ -23,55 +23,11 @@ export function createKanbanToolsServer(context: KanbanToolsContext): McpSdkServ
     name: 'kanban-tools',
     version: '1.0.0',
     tools: [
-      // Tool 1: get_linked_task
-      tool(
-        'get_linked_task',
-        'Get the kanban task linked to the current session, if any. Returns task details including title, description, and current column.',
-        {},
-        async () => {
-          logger.info('get_linked_task tool called', { sessionId: currentSessionId });
+      // NOTE: get_linked_task removed - Claude was calling it unnecessarily at session start
+      // The functionality is still available via update_task_status and complete_task which
+      // auto-detect the linked task when taskId is not provided.
 
-          // Find task linked to this session by iterating all tasks
-          // This is not optimal but works for now - could add an index later
-          const allKeys = await storage.keys('task:*');
-
-          for (const key of allKeys) {
-            const taskId = key.replace('task:', '');
-            const task = await storage.getTask(taskId);
-            if (task && task.sessionId === currentSessionId) {
-              return {
-                content: [{
-                  type: 'text' as const,
-                  text: JSON.stringify({
-                    found: true,
-                    task: {
-                      id: task.id,
-                      title: task.title,
-                      description: task.description,
-                      column: task.column,
-                      projectPath: task.projectPath,
-                      createdAt: task.createdAt,
-                      updatedAt: task.updatedAt,
-                    },
-                  }),
-                }],
-              };
-            }
-          }
-
-          return {
-            content: [{
-              type: 'text' as const,
-              text: JSON.stringify({
-                found: false,
-                message: 'No task is linked to this session',
-              }),
-            }],
-          };
-        }
-      ),
-
-      // Tool 2: update_task_status
+      // Tool 1: update_task_status
       tool(
         'update_task_status',
         'Update the status of a task. Use column "review" to mark a task as ready for review when you have completed the work.',
