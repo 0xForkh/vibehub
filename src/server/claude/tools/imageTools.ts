@@ -1,11 +1,30 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createSdkMcpServer, tool, type McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { z } from 'zod';
 import { logger as getLogger } from '../../../shared/logger.js';
 
 const logger = getLogger();
+
+/**
+ * Get MIME type from file extension
+ */
+function getMimeType(filePath: string): 'image/png' | 'image/jpeg' | 'image/webp' {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.webp':
+      return 'image/webp';
+    default:
+      // Default to png if unknown
+      return 'image/png';
+  }
+}
 
 /**
  * Context required for image tools to operate
@@ -161,7 +180,18 @@ export function createImageToolsServer(context: ImageToolsContext): McpSdkServer
             };
           } catch (err) {
             const error = err instanceof Error ? err.message : String(err);
-            logger.error('Failed to generate image', { error });
+            const stack = err instanceof Error ? err.stack : undefined;
+            // Extract OpenAI API error details if available
+            const apiError = (err as { status?: number; error?: unknown })?.error;
+            const statusCode = (err as { status?: number })?.status;
+
+            logger.error('Failed to generate image', {
+              error,
+              stack,
+              statusCode,
+              apiError: apiError ? JSON.stringify(apiError) : undefined,
+              prompt: args.prompt.slice(0, 200),
+            });
 
             return {
               content: [{
@@ -169,6 +199,7 @@ export function createImageToolsServer(context: ImageToolsContext): McpSdkServer
                 text: JSON.stringify({
                   success: false,
                   error,
+                  statusCode,
                 }),
               }],
             };
@@ -216,11 +247,16 @@ export function createImageToolsServer(context: ImageToolsContext): McpSdkServer
             const filename = args.filename || defaultFilename;
             const outputPath = generateUniqueFilename(outputDir, filename, format);
 
-            // Call OpenAI edit API with file stream
+            // Read file and create properly typed file for OpenAI API
+            const fileBuffer = fs.readFileSync(sourcePath);
+            const mimeType = getMimeType(sourcePath);
+            const imageFile = await toFile(fileBuffer, path.basename(sourcePath), { type: mimeType });
+
+            // Call OpenAI edit API with properly typed file
             const response = await client.images.edit({
               model: 'gpt-image-1.5',
               prompt: args.prompt,
-              image: fs.createReadStream(sourcePath),
+              image: imageFile,
               size: args.size || 'auto',
               quality: args.quality || 'auto',
               output_format: format,
@@ -262,7 +298,19 @@ export function createImageToolsServer(context: ImageToolsContext): McpSdkServer
             };
           } catch (err) {
             const error = err instanceof Error ? err.message : String(err);
-            logger.error('Failed to edit image', { error });
+            const stack = err instanceof Error ? err.stack : undefined;
+            // Extract OpenAI API error details if available
+            const apiError = (err as { status?: number; error?: unknown })?.error;
+            const statusCode = (err as { status?: number })?.status;
+
+            logger.error('Failed to edit image', {
+              error,
+              stack,
+              statusCode,
+              apiError: apiError ? JSON.stringify(apiError) : undefined,
+              sourcePath: args.source_image,
+              prompt: args.prompt.slice(0, 200),
+            });
 
             return {
               content: [{
@@ -270,6 +318,7 @@ export function createImageToolsServer(context: ImageToolsContext): McpSdkServer
                 text: JSON.stringify({
                   success: false,
                   error,
+                  statusCode,
                 }),
               }],
             };
