@@ -25,6 +25,7 @@ export interface ClaudeMetadata {
     totalCostUsd: number;
   };
   allowedTools?: string[]; // Session-specific tool allowlist (e.g., "Bash(pnpm build)")
+  allowedDirectories?: string[]; // External directories allowed for file operations
   pendingMessages?: string[]; // Messages queued by other sessions (send_to_session)
   worktreePath?: string; // If session was created with a worktree, path to worktree
   currentBranch?: string; // Current git branch of workingDir (fetched dynamically)

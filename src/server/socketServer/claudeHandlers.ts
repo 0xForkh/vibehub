@@ -260,7 +260,7 @@ export function registerClaudeHandlers(io: Server): void {
     });
 
     // Send permission decision to Claude
-    socket.on('claude:permission_response', async ({ sessionId, requestId, behavior, input, message, remember, global: isGlobal }) => {
+    socket.on('claude:permission_response', async ({ sessionId, requestId, behavior, input, message, remember, global: isGlobal, allowDirectory }) => {
       try {
         logger.info('Permission response received from client', {
           sessionId,
@@ -268,6 +268,7 @@ export function registerClaudeHandlers(io: Server): void {
           behavior,
           remember: remember || false,
           global: isGlobal || false,
+          allowDirectory: allowDirectory || undefined,
           hasMessage: !!message,
           message: message || undefined,
           socketId: socket.id,
@@ -276,7 +277,7 @@ export function registerClaudeHandlers(io: Server): void {
         // Build proper decision format based on behavior
         // requestId is now the toolUseId
         const decision = behavior === 'allow'
-          ? { behavior: 'allow' as const, updatedInput: input || {}, remember: remember || false, global: isGlobal || false }
+          ? { behavior: 'allow' as const, updatedInput: input || {}, remember: remember || false, global: isGlobal || false, allowDirectory: allowDirectory || undefined }
           : { behavior: 'deny' as const, message: message || 'Permission denied by user' };
 
         await claudeManager.sendPermissionDecision(sessionId, requestId, decision);
@@ -318,6 +319,29 @@ export function registerClaudeHandlers(io: Server): void {
       } catch (err) {
         logger.error('Failed to set allowed tools', { err, sessionId });
         socket.emit('claude:error', { message: 'Failed to set allowed tools' });
+      }
+    });
+
+    // Get allowed directories for a session
+    socket.on('claude:get_allowed_directories', ({ sessionId }) => {
+      try {
+        const directories = claudeManager.getAllowedDirectories(sessionId);
+        socket.emit('claude:allowed_directories', { sessionId, directories });
+      } catch (err) {
+        logger.error('Failed to get allowed directories', { err, sessionId });
+        socket.emit('claude:error', { message: 'Failed to get allowed directories' });
+      }
+    });
+
+    // Update allowed directories for a session
+    socket.on('claude:set_allowed_directories', ({ sessionId, directories }) => {
+      try {
+        logger.info('Updating allowed directories', { sessionId, directoryCount: directories.length });
+        claudeManager.setAllowedDirectories(sessionId, directories);
+        socket.emit('claude:allowed_directories', { sessionId, directories });
+      } catch (err) {
+        logger.error('Failed to set allowed directories', { err, sessionId });
+        socket.emit('claude:error', { message: 'Failed to set allowed directories' });
       }
     });
 

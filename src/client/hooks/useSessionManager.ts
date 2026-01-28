@@ -25,6 +25,7 @@ const createInitialSessionState = (sessionId: string): SessionState => ({
   contextUsage: null,
   slashCommands: [],
   allowedTools: [],
+  allowedDirectories: [],
   permissionMode: 'default',
   isDone: false,
 });
@@ -340,6 +341,10 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
       updateSessionState(sessionId, (state) => ({ ...state, allowedTools: tools }));
     };
 
+    const handleAllowedDirectories = ({ sessionId, directories }: { sessionId: string; directories: string[] }) => {
+      updateSessionState(sessionId, (state) => ({ ...state, allowedDirectories: directories }));
+    };
+
     const handleGlobalAllowedTools = ({ tools }: { tools: string[] }) => {
       setGlobalState((prev) => ({ ...prev, globalAllowedTools: tools }));
     };
@@ -412,6 +417,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
     socket.on('claude:tool_result', handleToolResult);
     socket.on('claude:slash_commands', handleSlashCommands);
     socket.on('claude:allowed_tools', handleAllowedTools);
+    socket.on('claude:allowed_directories', handleAllowedDirectories);
     socket.on('claude:global_allowed_tools', handleGlobalAllowedTools);
     socket.on('claude:permission_mode_updated', handlePermissionModeUpdated);
     socket.on('claude:files_uploaded', handleFilesUploaded);
@@ -430,6 +436,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
       socket.off('claude:tool_result', handleToolResult);
       socket.off('claude:slash_commands', handleSlashCommands);
       socket.off('claude:allowed_tools', handleAllowedTools);
+      socket.off('claude:allowed_directories', handleAllowedDirectories);
       socket.off('claude:global_allowed_tools', handleGlobalAllowedTools);
       socket.off('claude:permission_mode_updated', handlePermissionModeUpdated);
       socket.off('claude:files_uploaded', handleFilesUploaded);
@@ -527,7 +534,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
         respondToPermission: (
           requestId: string,
           behavior: 'allow' | 'deny',
-          permissionOpts?: { message?: string; remember?: boolean; global?: boolean }
+          permissionOpts?: { message?: string; remember?: boolean; global?: boolean; allowDirectory?: string }
         ) => {
           const currentState = sessionStates.get(sessionId);
           const request = currentState?.messages.find(
@@ -577,6 +584,7 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
             message: permissionOpts?.message,
             remember: permissionOpts?.remember,
             global: permissionOpts?.global,
+            allowDirectory: permissionOpts?.allowDirectory,
           });
         },
 
@@ -595,6 +603,10 @@ export function useSessionManager(options: SessionManagerOptions = {}): SessionM
 
         updateGlobalAllowedTools: (tools: string[]) => {
           socket.emit('claude:set_global_allowed_tools', { tools });
+        },
+
+        updateAllowedDirectories: (directories: string[]) => {
+          socket.emit('claude:set_allowed_directories', { sessionId, directories });
         },
 
         updatePermissionMode: (mode: PermissionMode) => {

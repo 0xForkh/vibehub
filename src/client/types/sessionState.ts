@@ -29,6 +29,7 @@ export interface SessionState {
   } | null;
   slashCommands: string[];
   allowedTools: string[];
+  allowedDirectories: string[]; // External directories allowed for file operations
   permissionMode: PermissionMode;
   isDone: boolean; // Claude finished and is waiting for user input
 }
@@ -42,11 +43,13 @@ export interface SessionActions {
     message?: string;
     remember?: boolean;
     global?: boolean;
+    allowDirectory?: string; // Allow access to an external directory
   }) => void;
   abort: () => void;
   fork: (name: string) => void;
   updateAllowedTools: (tools: string[]) => void;
   updateGlobalAllowedTools: (tools: string[]) => void;
+  updateAllowedDirectories: (directories: string[]) => void;
   updatePermissionMode: (mode: PermissionMode) => void;
   clearDone: () => void;
 }

@@ -137,6 +137,10 @@ export function ClaudePaneView({
     actions.updatePermissionMode('bypassPermissions');
   };
 
+  const handleApproveAndAllowDirectory = (requestId: string, directory: string) => {
+    actions.respondToPermission(requestId, 'allow', { allowDirectory: directory });
+  };
+
   const handleDenyRequest = (requestId: string) => {
     actions.respondToPermission(requestId, 'deny');
   };
@@ -539,11 +543,13 @@ export function ClaudePaneView({
             messages={messages}
             thinking={thinking}
             pendingRequest={pendingRequest}
+            workingDir={workingDir}
             onApproveRequest={handleApproveRequest}
             onApproveAndRememberRequest={handleApproveAndRememberRequest}
             onApproveAndRememberGlobalRequest={handleApproveAndRememberGlobalRequest}
             onApproveAndSwitchToAcceptEdits={handleApproveAndSwitchToAcceptEdits}
             onApproveAndSwitchToBypass={handleApproveAndSwitchToBypass}
+            onApproveAndAllowDirectory={handleApproveAndAllowDirectory}
             onDenyRequest={handleDenyRequest}
             toolResults={toolResults}
             sessionId={sessionId}

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import { logger as getLogger } from '../../shared/logger.js';
 import { getStorageBackend } from '../database/redis.js';
 import { SessionStore } from '../sessions/SessionStore.js';
@@ -35,7 +36,9 @@ interface ActiveClaudeSession {
   messageHistory: StoredMessage[]; // Store messages for UI replay
   slashCommands: string[]; // Available slash commands from SDK
   allowedTools: Set<string>; // Session-specific tool allowlist (e.g., "Bash(pnpm build)")
+  allowedDirectories: Set<string>; // External directories allowed for file operations
   permissionMode: PermissionMode; // Current permission mode
+  workingDir: string; // Session's working directory
   contextUsage?: {
     totalTokensUsed: number;
     contextWindow: number;
@@ -228,12 +231,13 @@ export class ClaudeSessionManager {
 
     const pendingPermissions = new Map<string, PendingPermission>();
 
-    // Load message history, context usage, and allowed tools from database if resuming
+    // Load message history, context usage, allowed tools, and allowed directories from database if resuming
     // Only keep last 50 messages to prevent UI from becoming sluggish
     const MAX_MESSAGES = 50;
     let messageHistory: StoredMessage[] = [];
     let storedContextUsage: { totalTokensUsed: number; contextWindow: number; totalCostUsd: number } | undefined;
     let storedAllowedTools: string[] = [];
+    let storedAllowedDirectories: string[] = [];
     if (resumeSessionId) {
       try {
         const storedSession = await this.sessionStore.getSession(sessionId);
@@ -259,6 +263,13 @@ export class ClaudeSessionManager {
           this.logger.info('Loaded allowed tools from database', {
             sessionId,
             toolCount: storedAllowedTools.length,
+          });
+        }
+        if (storedSession?.claudeMetadata?.allowedDirectories) {
+          storedAllowedDirectories = storedSession.claudeMetadata.allowedDirectories as string[];
+          this.logger.info('Loaded allowed directories from database', {
+            sessionId,
+            directoryCount: storedAllowedDirectories.length,
           });
         }
       } catch (err) {
@@ -311,7 +322,9 @@ export class ClaudeSessionManager {
       messageHistory,
       slashCommands: [],
       allowedTools: new Set(storedAllowedTools),
+      allowedDirectories: new Set(storedAllowedDirectories),
       permissionMode: effectivePermissionMode,
+      workingDir,
       contextUsage: storedContextUsage,
     };
 
@@ -406,7 +419,7 @@ export class ClaudeSessionManager {
   async sendPermissionDecision(
     sessionId: string,
     toolUseId: string,
-    decision: { behavior: 'allow'; updatedInput?: Record<string, unknown>; remember?: boolean; global?: boolean } | { behavior: 'deny'; message?: string }
+    decision: { behavior: 'allow'; updatedInput?: Record<string, unknown>; remember?: boolean; global?: boolean; allowDirectory?: string } | { behavior: 'deny'; message?: string }
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -436,6 +449,23 @@ export class ClaudeSessionManager {
 
     // Resolve the pending promise with the decision
     if (decision.behavior === 'allow') {
+      // If allowDirectory is set, add to session's allowed directories
+      if (decision.allowDirectory) {
+        session.allowedDirectories.add(decision.allowDirectory);
+        this.logger.info('Added directory to session allowed directories', {
+          sessionId,
+          directory: decision.allowDirectory,
+          allowedDirectoriesSize: session.allowedDirectories.size,
+        });
+        // Persist to database
+        this.persistAllowedDirectories(sessionId, session.allowedDirectories);
+        // Notify all clients in session room of updated allowed directories
+        this.emitToSession(sessionId, 'claude:allowed_directories', {
+          sessionId,
+          directories: Array.from(session.allowedDirectories),
+        });
+      }
+
       // If remember flag is set, add to allowlist (global or session)
       if (decision.remember) {
         const pattern = this.generatePermissionPattern(pending.toolName, pending.input);
@@ -614,6 +644,43 @@ export class ClaudeSessionManager {
   }
 
   /**
+   * Check if a file path is within the working directory or any allowed directory
+   */
+  // eslint-disable-next-line class-methods-use-this
+  private isPathAllowed(filePath: string, workingDir: string, allowedDirectories: Set<string>): boolean {
+    // Resolve to absolute path
+    const absolutePath = path.resolve(filePath);
+    const absoluteWorkingDir = path.resolve(workingDir);
+
+    // Check if within working directory
+    const relativeToWorkingDir = path.relative(absoluteWorkingDir, absolutePath);
+    if (!relativeToWorkingDir.startsWith('..') && !path.isAbsolute(relativeToWorkingDir)) {
+      return true;
+    }
+
+    // Check if within any allowed directory
+    for (const allowedDir of allowedDirectories) {
+      const absoluteAllowedDir = path.resolve(allowedDir);
+      const relativeToAllowed = path.relative(absoluteAllowedDir, absolutePath);
+      if (!relativeToAllowed.startsWith('..') && !path.isAbsolute(relativeToAllowed)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Get the parent directory of a file path that could be allowed
+   * Returns the deepest directory that contains the path
+   */
+  // eslint-disable-next-line class-methods-use-this
+  getExternalDirectory(filePath: string): string {
+    const absolutePath = path.resolve(filePath);
+    return path.dirname(absolutePath);
+  }
+
+  /**
    * Check if a tool use matches any pattern in session or global allowlist
    */
   private async isToolAllowed(session: ActiveClaudeSession, toolName: string, input: Record<string, unknown>): Promise<boolean> {
@@ -649,7 +716,29 @@ export class ClaudeSessionManager {
       return true;
     }
 
-    // For non-Bash tools, use simple pattern matching
+    // For file tools (Read, Write, Edit), check if path is within working dir or allowed directories
+    if ((toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') && input.file_path) {
+      const filePath = String(input.file_path);
+      if (this.isPathAllowed(filePath, session.workingDir, session.allowedDirectories)) {
+        this.logger.info('File path allowed by working dir or allowed directories', {
+          toolName,
+          filePath,
+          workingDir: session.workingDir,
+          allowedDirectories: Array.from(session.allowedDirectories),
+        });
+        return true;
+      }
+      // Path is external - will need permission
+      this.logger.info('File path is external to working dir and allowed directories', {
+        toolName,
+        filePath,
+        workingDir: session.workingDir,
+        allowedDirectories: Array.from(session.allowedDirectories),
+      });
+      return false;
+    }
+
+    // For non-Bash, non-file tools, use simple pattern matching
     const pattern = this.generatePermissionPattern(toolName, input);
 
     this.logger.info('Checking tool allowlist', {
@@ -1117,6 +1206,26 @@ export class ClaudeSessionManager {
   }
 
   /**
+   * Persist allowed directories to database
+   */
+  private async persistAllowedDirectories(sessionId: string, allowedDirectories: Set<string>): Promise<void> {
+    try {
+      const existingSession = await this.sessionStore.getSession(sessionId);
+      if (existingSession?.claudeMetadata) {
+        await this.sessionStore.updateSession(sessionId, {
+          claudeMetadata: {
+            ...existingSession.claudeMetadata,
+            allowedDirectories: Array.from(allowedDirectories),
+          },
+        });
+        this.logger.debug('Allowed directories persisted', { sessionId, directoryCount: allowedDirectories.size });
+      }
+    } catch (err) {
+      this.logger.error('Failed to persist allowed directories', { sessionId, err });
+    }
+  }
+
+  /**
    * Handle completion
    */
   private async handleComplete(sessionId: string): Promise<void> {
@@ -1231,6 +1340,43 @@ export class ClaudeSessionManager {
     });
     // Persist to database
     this.persistAllowedTools(sessionId, session.allowedTools);
+  }
+
+  /**
+   * Get the current allowed directories for a session
+   */
+  getAllowedDirectories(sessionId: string): string[] {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return [];
+    }
+    return Array.from(session.allowedDirectories);
+  }
+
+  /**
+   * Update the allowed directories for a session
+   */
+  setAllowedDirectories(sessionId: string, directories: string[]): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      this.logger.warn('Cannot set allowed directories: session not found', { sessionId });
+      return;
+    }
+    session.allowedDirectories = new Set(directories);
+    this.logger.info('Allowed directories updated', {
+      sessionId,
+      directoryCount: directories.length,
+      directories,
+    });
+    // Persist to database
+    this.persistAllowedDirectories(sessionId, session.allowedDirectories);
+  }
+
+  /**
+   * Get the working directory for a session
+   */
+  getWorkingDir(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.workingDir;
   }
 
   /**

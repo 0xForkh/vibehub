@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Check, X, CheckCircle, XCircle, ChevronDown, Globe, Monitor } from 'lucide-react';
+import { Check, X, CheckCircle, XCircle, ChevronDown, Globe, Monitor, FolderOpen } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Badge } from '../../ui/badge';
 import { EditToolUse } from './EditToolUse';
@@ -15,11 +15,13 @@ import { ImageToolUse } from './ImageToolUse';
 
 interface ApprovalButtonsProps {
   toolName: string;
+  externalDirectory?: string; // If file tool is accessing external directory
   onApprove?: () => void;
   onApproveAndRemember?: () => void;
   onApproveAndRememberGlobal?: () => void;
   onApproveAndSwitchToAcceptEdits?: () => void;
   onApproveAndSwitchToBypass?: () => void;
+  onApproveAndAllowDirectory?: () => void;
   onDeny?: () => void;
 }
 
@@ -28,18 +30,26 @@ function isFileEditTool(toolName: string): boolean {
   return toolName === 'Edit' || toolName === 'Write';
 }
 
+// Check if tool is a file operation tool (Read, Write, Edit)
+function isFileOperationTool(toolName: string): boolean {
+  return toolName === 'Read' || toolName === 'Write' || toolName === 'Edit';
+}
+
 function ApprovalButtons({
   toolName,
+  externalDirectory,
   onApprove,
   onApproveAndRemember,
   onApproveAndRememberGlobal,
   onApproveAndSwitchToAcceptEdits,
   onApproveAndSwitchToBypass,
+  onApproveAndAllowDirectory,
   onDeny,
 }: ApprovalButtonsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const isEditTool = isFileEditTool(toolName);
+  const isFileTool = isFileOperationTool(toolName);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -75,7 +85,28 @@ function ApprovalButtons({
         </div>
 
         {isOpen && (
-          <div className="absolute left-0 top-full z-10 mt-1 w-56 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+          <div className="absolute left-0 top-full z-10 mt-1 w-64 rounded-md border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-800">
+            {/* Show "Allow access to directory" for file tools accessing external paths */}
+            {isFileTool && externalDirectory && (
+              <>
+                <button
+                  onClick={() => {
+                    onApproveAndAllowDirectory?.();
+                    setIsOpen(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                >
+                  <FolderOpen className="h-4 w-4 text-purple-500" />
+                  <div className="flex-1 overflow-hidden">
+                    <div>Allow access to directory</div>
+                    <div className="truncate text-xs text-gray-500 dark:text-gray-400" title={externalDirectory}>
+                      {externalDirectory}
+                    </div>
+                  </div>
+                </button>
+                <div className="my-1 border-t border-gray-200 dark:border-gray-700" />
+              </>
+            )}
             {isEditTool ? (
               // File edit tools: show mode-switching options
               <>
@@ -149,11 +180,13 @@ interface ToolUseRendererProps {
   output?: unknown;
   showApprovalButtons?: boolean;
   approvalDecision?: 'approved' | 'rejected' | null;
+  externalDirectory?: string; // If file tool is accessing external directory
   onApprove?: () => void;
   onApproveAndRemember?: () => void;
   onApproveAndRememberGlobal?: () => void;
   onApproveAndSwitchToAcceptEdits?: () => void;
   onApproveAndSwitchToBypass?: () => void;
+  onApproveAndAllowDirectory?: () => void;
   onDeny?: () => void;
 }
 
@@ -163,11 +196,13 @@ export function ToolUseRenderer({
   output,
   showApprovalButtons = false,
   approvalDecision,
+  externalDirectory,
   onApprove,
   onApproveAndRemember,
   onApproveAndRememberGlobal,
   onApproveAndSwitchToAcceptEdits,
   onApproveAndSwitchToBypass,
+  onApproveAndAllowDirectory,
   onDeny
 }: ToolUseRendererProps) {
   // Render the appropriate tool component
@@ -312,11 +347,13 @@ export function ToolUseRenderer({
       ) : (
         <ApprovalButtons
           toolName={toolName}
+          externalDirectory={externalDirectory}
           onApprove={onApprove}
           onApproveAndRemember={onApproveAndRemember}
           onApproveAndRememberGlobal={onApproveAndRememberGlobal}
           onApproveAndSwitchToAcceptEdits={onApproveAndSwitchToAcceptEdits}
           onApproveAndSwitchToBypass={onApproveAndSwitchToBypass}
+          onApproveAndAllowDirectory={onApproveAndAllowDirectory}
           onDeny={onDeny}
         />
       )}

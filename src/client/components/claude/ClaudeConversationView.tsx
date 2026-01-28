@@ -18,25 +18,49 @@ interface ClaudeConversationViewProps {
   messages: ClaudeMessage[];
   thinking: boolean;
   pendingRequest?: PermissionRequest | null;
+  workingDir?: string;
   onApproveRequest?: (requestId: string) => void;
   onApproveAndRememberRequest?: (requestId: string) => void;
   onApproveAndRememberGlobalRequest?: (requestId: string) => void;
   onApproveAndSwitchToAcceptEdits?: (requestId: string) => void;
   onApproveAndSwitchToBypass?: (requestId: string) => void;
+  onApproveAndAllowDirectory?: (requestId: string, directory: string) => void;
   onDenyRequest?: (requestId: string) => void;
   toolResults?: Map<string, unknown>;
   sessionId: string;
+}
+
+// Helper to get parent directory from file path
+function getParentDirectory(filePath: string): string {
+  // Handle both Unix and Windows paths
+  const parts = filePath.replace(/\\/g, '/').split('/');
+  parts.pop(); // Remove filename
+  return parts.join('/') || '/';
+}
+
+// Helper to check if a path is external to working directory
+function isExternalPath(filePath: string, workingDir?: string): boolean {
+  if (!workingDir || !filePath) return false;
+
+  // Normalize paths for comparison
+  const normalizedFile = filePath.replace(/\\/g, '/');
+  const normalizedWorking = workingDir.replace(/\\/g, '/').replace(/\/$/, '');
+
+  // Check if file path starts with working directory
+  return !normalizedFile.startsWith(normalizedWorking + '/') && normalizedFile !== normalizedWorking;
 }
 
 export function ClaudeConversationView({
   messages,
   thinking,
   pendingRequest,
+  workingDir,
   onApproveRequest,
   onApproveAndRememberRequest,
   onApproveAndRememberGlobalRequest,
   onApproveAndSwitchToAcceptEdits,
   onApproveAndSwitchToBypass,
+  onApproveAndAllowDirectory,
   onDenyRequest,
   toolResults = new Map(),
   sessionId,
@@ -269,6 +293,14 @@ export function ClaudeConversationView({
             const toolOutput = msg.permissionRequest.toolUseId
               ? toolResults.get(msg.permissionRequest.toolUseId)
               : undefined;
+
+            // Determine if this is an external file path for file tools
+            const inputObj = msg.permissionRequest.input as Record<string, unknown> | undefined;
+            const filePath = inputObj?.file_path as string | undefined;
+            const isFileToolWithExternalPath = ['Read', 'Write', 'Edit'].includes(msg.permissionRequest.toolName) &&
+              filePath && isExternalPath(filePath, workingDir);
+            const externalDirectory = isFileToolWithExternalPath && filePath ? getParentDirectory(filePath) : undefined;
+
             return (
               <div key={idx} className="mb-3 flex justify-start">
                 <div className="max-w-[80%] rounded-lg bg-white px-3 py-2 shadow-sm text-gray-900 dark:bg-gray-800 dark:text-gray-100">
@@ -278,11 +310,13 @@ export function ClaudeConversationView({
                     output={toolOutput}
                     showApprovalButtons={!hasDecision}
                     approvalDecision={msg.permissionRequest.decision}
+                    externalDirectory={externalDirectory}
                     onApprove={!hasDecision ? () => onApproveRequest?.(msg.permissionRequest!.requestId) : undefined}
                     onApproveAndRemember={!hasDecision ? () => onApproveAndRememberRequest?.(msg.permissionRequest!.requestId) : undefined}
                     onApproveAndRememberGlobal={!hasDecision ? () => onApproveAndRememberGlobalRequest?.(msg.permissionRequest!.requestId) : undefined}
                     onApproveAndSwitchToAcceptEdits={!hasDecision ? () => onApproveAndSwitchToAcceptEdits?.(msg.permissionRequest!.requestId) : undefined}
                     onApproveAndSwitchToBypass={!hasDecision ? () => onApproveAndSwitchToBypass?.(msg.permissionRequest!.requestId) : undefined}
+                    onApproveAndAllowDirectory={!hasDecision && externalDirectory ? () => onApproveAndAllowDirectory?.(msg.permissionRequest!.requestId, externalDirectory) : undefined}
                     onDeny={!hasDecision ? () => onDenyRequest?.(msg.permissionRequest!.requestId) : undefined}
                   />
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
