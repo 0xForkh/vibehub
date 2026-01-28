@@ -15,6 +15,7 @@ interface TaskAddFormProps {
 export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const fileMentionMenuRef = useRef<HTMLDivElement>(null);
 
@@ -71,18 +72,23 @@ export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps
   }, [fileMention]);
 
   const handleSubmit = async () => {
-    if (!title.trim()) return;
-    // Parse file mentions to convert @[name](path) to full path
-    const processedDescription = description.trim() ? parseFileMentions(description.trim()) : undefined;
-    await onSubmit(
-      title.trim(),
-      processedDescription,
-      attachments.length > 0 ? attachments : undefined
-    );
-    setTitle('');
-    setDescription('');
-    clearAttachments();
-    fileMention.resetState();
+    if (!title.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      // Parse file mentions to convert @[name](path) to full path
+      const processedDescription = description.trim() ? parseFileMentions(description.trim()) : undefined;
+      await onSubmit(
+        title.trim(),
+        processedDescription,
+        attachments.length > 0 ? attachments : undefined
+      );
+      setTitle('');
+      setDescription('');
+      clearAttachments();
+      fileMention.resetState();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -111,9 +117,10 @@ export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps
         placeholder="Task title..."
         className="mb-2"
         autoFocus
+        disabled={isSubmitting}
         onKeyDown={(e) => {
-          if (e.key === 'Escape') onCancel();
-          if (e.key === 'Enter' && !e.shiftKey && title.trim()) {
+          if (e.key === 'Escape' && !isSubmitting) onCancel();
+          if (e.key === 'Enter' && !e.shiftKey && title.trim() && !isSubmitting) {
             e.preventDefault();
             handleSubmit();
           }
@@ -124,6 +131,7 @@ export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps
         <textarea
           ref={descriptionRef}
           value={description}
+          disabled={isSubmitting}
           onChange={(e) => {
             const value = e.target.value;
             const cursorPosition = e.target.selectionStart || 0;
@@ -134,7 +142,7 @@ export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps
             fileMention.handleInputChange(value, cursorPosition);
           }}
           placeholder="Description (optional)... Use @ to mention files"
-          className="w-full resize-none rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:text-gray-100 dark:placeholder:text-gray-500"
+          className="w-full resize-none rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-100 dark:placeholder:text-gray-500"
           rows={2}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {
@@ -143,7 +151,7 @@ export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps
                 fileMention.closeMenu();
                 return;
               }
-              onCancel();
+              if (!isSubmitting) onCancel();
             }
             // Handle file mention menu navigation
             if (fileMention.showMenu && fileMention.suggestions.length > 0) {
@@ -227,16 +235,24 @@ export function TaskAddForm({ onSubmit, onCancel, workingDir }: TaskAddFormProps
       />
 
       <div className="flex items-center gap-2">
-        <Button size="sm" onClick={handleSubmit}>
-          Add Task
+        <Button size="sm" onClick={handleSubmit} disabled={isSubmitting}>
+          {isSubmitting ? (
+            <>
+              <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+              Adding...
+            </>
+          ) : (
+            'Add Task'
+          )}
         </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="ghost" onClick={onCancel} disabled={isSubmitting}>
           Cancel
         </Button>
         <button
           type="button"
           onClick={openFilePicker}
-          className="ml-auto p-1 text-gray-400 transition-colors hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+          disabled={isSubmitting}
+          className="ml-auto p-1 text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-gray-500 dark:hover:text-gray-300"
           title="Attach files"
         >
           <Paperclip className="h-4 w-4" />

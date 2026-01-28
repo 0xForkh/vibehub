@@ -271,7 +271,7 @@ export function TaskListView({
               <Plus className="h-4 w-4" />
             </Button>
           </div>
-          <div className="flex-1 space-y-2 overflow-y-auto p-2">
+          <div className="flex-1 space-y-3 overflow-y-auto p-2">
             {isAdding && (
               <TaskAddForm
                 onSubmit={async (title, description, attachments) => {
@@ -300,7 +300,7 @@ export function TaskListView({
               <span className="ml-2 text-xs text-gray-500">({rightTasks.length})</span>
             </h2>
           </div>
-          <div className="flex-1 space-y-2 overflow-y-auto p-2">
+          <div className="flex-1 space-y-3 overflow-y-auto p-2">
             {rightTasks.map(task => renderTaskCard(task, 'right'))}
             {rightTasks.length === 0 && (
               <div className="py-8 text-center text-sm text-gray-500 dark:text-gray-400">

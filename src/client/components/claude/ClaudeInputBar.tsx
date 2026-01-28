@@ -49,6 +49,7 @@ export function ClaudeInputBar({
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [selectedSlashIndex, setSelectedSlashIndex] = useState(0);
@@ -166,11 +167,16 @@ export function ClaudeInputBar({
   // Handle files from any source
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const fileArray = Array.from(files);
-    const processed = await Promise.all(fileArray.map(processFile));
-    const valid = processed.filter((f): f is FileAttachment => f !== null);
+    setIsProcessingFiles(true);
+    try {
+      const processed = await Promise.all(fileArray.map(processFile));
+      const valid = processed.filter((f): f is FileAttachment => f !== null);
 
-    if (valid.length > 0) {
-      setAttachments((prev) => [...prev, ...valid]);
+      if (valid.length > 0) {
+        setAttachments((prev) => [...prev, ...valid]);
+      }
+    } finally {
+      setIsProcessingFiles(false);
     }
   }, [processFile]);
 
@@ -276,6 +282,10 @@ export function ClaudeInputBar({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    // Don't submit while files are still being processed (prevents race condition)
+    if (isProcessingFiles) {
+      return;
+    }
     if ((message.trim() || attachments.length > 0) && !disabled) {
       // Parse mentions to convert @[name](type:value) to appropriate format
       const processedMessage = parseMentions(message.trim());
