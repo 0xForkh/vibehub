@@ -32,7 +32,7 @@ interface SessionSidebarProps {
   onSelectProject: (projectPath: string, projectName: string) => void;
   onCreateSession: (name: string, workingDir: string, worktree?: WorktreeOptions) => void;
   onRenameSession: (sessionId: string, name: string) => void;
-  onDeleteSession: (sessionId: string, cleanupWorktree?: boolean) => void;
+  onDeleteSession: (sessionId: string, cleanupWorktree?: boolean, deleteBranch?: boolean) => void;
   onForkSession: (sessionId: string, name: string) => void;
   notifications?: SessionNotification[];
 }
@@ -303,8 +303,8 @@ export function SessionSidebar({
     }
   };
 
-  const handleDeleteConfirm = (sessionId: string, cleanupWorktree: boolean) => {
-    onDeleteSession(sessionId, cleanupWorktree);
+  const handleDeleteConfirm = (sessionId: string, cleanupWorktree: boolean, deleteBranch: boolean) => {
+    onDeleteSession(sessionId, cleanupWorktree, deleteBranch);
     setDeleteDialogSessionId(null);
   };
 

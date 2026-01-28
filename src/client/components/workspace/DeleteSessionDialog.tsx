@@ -8,7 +8,7 @@ interface DeleteSessionDialogProps {
   session: Session | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (sessionId: string, cleanupWorktree: boolean) => void;
+  onConfirm: (sessionId: string, cleanupWorktree: boolean, deleteBranch: boolean) => void;
 }
 
 export function DeleteSessionDialog({
@@ -18,13 +18,18 @@ export function DeleteSessionDialog({
   onConfirm,
 }: DeleteSessionDialogProps) {
   const [cleanupWorktree, setCleanupWorktree] = useState(true);
+  const [deleteBranch, setDeleteBranch] = useState(false);
 
   if (!session) return null;
 
   const hasWorktree = !!session.claudeMetadata?.worktreePath;
 
   const handleConfirm = () => {
-    onConfirm(session.id, hasWorktree && cleanupWorktree);
+    onConfirm(
+      session.id,
+      hasWorktree && cleanupWorktree,
+      hasWorktree && cleanupWorktree && deleteBranch
+    );
     onOpenChange(false);
   };
 
@@ -60,7 +65,13 @@ export function DeleteSessionDialog({
                 <input
                   type="checkbox"
                   checked={cleanupWorktree}
-                  onChange={(e) => setCleanupWorktree(e.target.checked)}
+                  onChange={(e) => {
+                    setCleanupWorktree(e.target.checked);
+                    // Reset delete branch if unchecking cleanup worktree
+                    if (!e.target.checked) {
+                      setDeleteBranch(false);
+                    }
+                  }}
                   className="h-4 w-4 rounded border-gray-600 bg-gray-800"
                 />
                 <span className="flex items-center gap-1.5 text-sm text-gray-300">
@@ -68,6 +79,20 @@ export function DeleteSessionDialog({
                   Also remove the git worktree
                 </span>
               </label>
+
+              {cleanupWorktree && (
+                <label className="flex items-center gap-2 mt-2 ml-6 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={deleteBranch}
+                    onChange={(e) => setDeleteBranch(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-600 bg-gray-800"
+                  />
+                  <span className="text-sm text-gray-400">
+                    Also delete the branch
+                  </span>
+                </label>
+              )}
             </div>
           )}
 

@@ -91,10 +91,13 @@ export function useSessions() {
     }
   };
 
-  const deleteSession = async (sessionId: string, cleanupWorktree = false) => {
+  const deleteSession = async (sessionId: string, cleanupWorktree = false, deleteBranch = false) => {
     try {
-      const params = cleanupWorktree ? '?cleanupWorktree=true' : '';
-      await api.delete(`/api/sessions/${sessionId}${params}`);
+      const params = new URLSearchParams();
+      if (cleanupWorktree) params.set('cleanupWorktree', 'true');
+      if (deleteBranch) params.set('deleteBranch', 'true');
+      const queryString = params.toString() ? `?${params.toString()}` : '';
+      await api.delete(`/api/sessions/${sessionId}${queryString}`);
       await fetchSessions(false);
     } catch (err) {
       throw new Error(err instanceof Error ? err.message : 'Failed to delete session');

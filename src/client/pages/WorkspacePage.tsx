@@ -410,11 +410,11 @@ export function WorkspacePage() {
     }
   }, [renameSession]);
 
-  const handleDeleteSession = useCallback(async (sessionId: string, cleanupWorktree = false) => {
+  const handleDeleteSession = useCallback(async (sessionId: string, cleanupWorktree = false, deleteBranch = false) => {
     try {
       // Close tab if open
       handleCloseTab(sessionId);
-      await deleteSession(sessionId, cleanupWorktree);
+      await deleteSession(sessionId, cleanupWorktree, deleteBranch);
     } catch (err) {
       console.error('Failed to delete session:', err);
     }
