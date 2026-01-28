@@ -1,6 +1,5 @@
 import { logger as getLogger } from '../../shared/logger.js';
 import { getStorageBackend } from '../database/redis.js';
-import { createPreviewToolsServer } from '../preview/index.js';
 import { SessionStore } from '../sessions/SessionStore.js';
 import { ClaudeAgentService } from './ClaudeAgentService.js';
 import { createImageToolsServer } from './tools/imageTools.js';
@@ -287,9 +286,6 @@ export class ClaudeSessionManager {
       currentSessionId: sessionId,
     });
 
-    // Create preview tools MCP server
-    const previewToolsServer = createPreviewToolsServer();
-
     const service = new ClaudeAgentService({
       workingDir,
       sessionId: resumeSessionId,
@@ -299,7 +295,6 @@ export class ClaudeSessionManager {
         'session-tools': sessionToolsServer,
         'kanban-tools': kanbanToolsServer,
         'image-tools': imageToolsServer,
-        'preview-tools': previewToolsServer,
       },
       onMessage: (message) => this.handleMessage(sessionId, message),
       onPermissionRequest: async (toolName, input, toolUseId) => this.handlePermissionRequest(sessionId, toolName, input, toolUseId),

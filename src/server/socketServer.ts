@@ -9,6 +9,7 @@ import { logger } from '../shared/logger.js';
 import { filesRouter } from './api/files.js';
 import { gitRouter } from './api/git.js';
 import { sessionsRouter } from './api/sessions.js';
+import { skillsRouter } from './api/skills.js';
 import { tasksRouter } from './api/tasks.js';
 import { SessionStore } from './sessions/SessionStore.js';
 import { serveStatic } from './socketServer/assets.js';
@@ -62,6 +63,7 @@ export async function server(
     .use('/api/files', filesRouter)
     .use('/api/git', gitRouter)
     .use('/api/tasks', tasksRouter)
+    .use('/api/skills', skillsRouter)
     .get('/api/uploads/:sessionId/:filename', async (req, res) => {
       try {
         const { sessionId, filename } = req.params;
