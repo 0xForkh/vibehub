@@ -1,5 +1,5 @@
-import { Trash2, Circle, ChevronDown, ChevronRight, ListTodo, CheckCircle2, Clock, GitBranch, GitCommitHorizontal, Terminal, FolderOpen, Settings, Shield, ShieldCheck, ShieldOff, FileEdit, ExternalLink, Server } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Trash2, Circle, ChevronDown, ChevronRight, ListTodo, CheckCircle2, Clock, GitBranch, GitCommitHorizontal, Terminal, FolderOpen, Settings, Shield, ShieldCheck, ShieldOff, FileEdit, ExternalLink, Server, RefreshCw } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { TerminalPane } from '../terminal/TerminalPane';
@@ -9,6 +9,7 @@ import { FileBrowser } from './FileBrowser';
 import { GitPanel } from './GitPanel';
 import { AllowedToolsSettings } from './AllowedToolsSettings';
 import { PreviewPanel } from './PreviewPanel';
+import { SkillsMenu } from './SkillsMenu';
 import { ForkSessionDialog } from '../workspace/ForkSessionDialog';
 import { WorkingDirProvider } from '../../contexts/WorkingDirContext';
 import type { SessionState, SessionActions, PermissionMode } from '../../types/sessionState';
@@ -67,6 +68,7 @@ export function ClaudePaneView({
   const [showPermissionModeMenu, setShowPermissionModeMenu] = useState(false);
   const [showForkDialog, setShowForkDialog] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [retryingPreview, setRetryingPreview] = useState(false);
 
   const {
     isConnected,
@@ -159,6 +161,30 @@ export function ClaudePaneView({
     actions.updateGlobalAllowedTools(tools);
   };
 
+  const handleRunSkill = useCallback((prompt: string) => {
+    if (!isConnected) return;
+    actions.sendMessage(prompt);
+  }, [isConnected, actions]);
+
+  const handleRetryPreview = useCallback(async () => {
+    if (retryingPreview) return;
+    setRetryingPreview(true);
+    try {
+      const response = await fetch(`/api/sessions/preview/${sessionId}/retry`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        console.error('Failed to retry preview:', data.error);
+      }
+    } catch (err) {
+      console.error('Failed to retry preview:', err);
+    } finally {
+      setRetryingPreview(false);
+    }
+  }, [sessionId, retryingPreview]);
+
   const inProgressCount = todos.filter(t => t.status === 'in_progress').length;
   const completedCount = todos.filter(t => t.status === 'completed').length;
 
@@ -236,12 +262,23 @@ export function ClaudePaneView({
                 </div>
               )}
               {previewStatus === 'error' && (
-                <div
-                  className="flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-1 text-xs text-red-700 dark:bg-red-900 dark:text-red-300"
-                  title={previewError || 'Preview setup failed'}
-                >
-                  <Circle className="h-3 w-3 fill-current" />
-                  <span className="hidden sm:inline">Preview error</span>
+                <div className="flex items-center gap-1">
+                  <div
+                    className="flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-1 text-xs text-red-700 dark:bg-red-900 dark:text-red-300"
+                    title={previewError || 'Preview setup failed'}
+                  >
+                    <Circle className="h-3 w-3 fill-current" />
+                    <span className="hidden sm:inline">Preview error</span>
+                  </div>
+                  <button
+                    onClick={handleRetryPreview}
+                    disabled={retryingPreview}
+                    className="flex items-center gap-1 rounded-md bg-red-100 px-1.5 py-1 text-xs text-red-700 hover:bg-red-200 disabled:opacity-50 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800"
+                    title="Retry starting preview"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${retryingPreview ? 'animate-spin' : ''}`} />
+                    <span className="hidden sm:inline">Retry</span>
+                  </button>
                 </div>
               )}
               {previewStatus === 'running' && previewUrl && (
@@ -373,6 +410,11 @@ export function ClaudePaneView({
                 >
                   <Settings className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Button>
+                <SkillsMenu
+                  workingDir={workingDir}
+                  disabled={!isConnected || thinking}
+                  onRunSkill={handleRunSkill}
+                />
               </div>
 
               {/* Session actions */}
